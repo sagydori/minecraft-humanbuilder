@@ -13,10 +13,12 @@ import com.humanbuilder.scanner.SchematicBridge;
 import com.humanbuilder.scanner.Target;
 import com.humanbuilder.stochastic.StochasticEngine;
 import com.humanbuilder.util.InputSimulator;
+import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
@@ -48,7 +50,6 @@ public final class BuilderStateMachine {
     private Target target;
     private PlacementSolution solution;
     private boolean misclickPending;
-    private int clickHoldTicks;
 
     // Navigation.
     private BlockPos navTarget;
@@ -300,24 +301,31 @@ public final class BuilderStateMachine {
             delay = (long) StochasticEngine.INSTANCE.hesitationMs();
         }
         waitUntilMs = System.currentTimeMillis() + delay;
-        clickHoldTicks = 2;
         state = State.CLICKING;
     }
 
     private void tickClicking(MinecraftClient client) {
         if (System.currentTimeMillis() < waitUntilMs) return;
+        performPlacement(client);
+        double factor = TPSMonitor.INSTANCE.getDelayFactor();
+        waitUntilMs = System.currentTimeMillis()
+                + (long) StochasticEngine.INSTANCE.placementCooldownMs(factor);
+        state = State.COOLDOWN;
+    }
 
-        if (clickHoldTicks == 2) {
-            InputSimulator.setUse(client, true);
-        }
-        clickHoldTicks--;
-        if (clickHoldTicks <= 0) {
-            InputSimulator.setUse(client, false);
-            double factor = TPSMonitor.INSTANCE.getDelayFactor();
-            waitUntilMs = System.currentTimeMillis()
-                    + (long) StochasticEngine.INSTANCE.placementCooldownMs(factor);
-            state = State.COOLDOWN;
-        }
+    /**
+     * Place the block via the interaction manager using the exact hit result we
+     * computed. This is the game's own placement path (it does not construct a
+     * packet on our behalf) and it does not depend on the crosshair happening to
+     * land on the block, so it is far more reliable than driving the use key.
+     */
+    private void performPlacement(MinecraftClient client) {
+        ClientPlayerEntity player = client.player;
+        if (player == null || solution == null || client.interactionManager == null) return;
+        BlockHitResult hit = new BlockHitResult(
+                solution.hitVec(), solution.side(), solution.anchorPos(), false);
+        client.interactionManager.interactBlock(player, HAND, hit);
+        player.swingHand(HAND); // cosmetic arm swing (ActionResult is a sealed type now)
     }
 
     private void tickCooldown(MinecraftClient client, ClientPlayerEntity player) {
@@ -424,7 +432,6 @@ public final class BuilderStateMachine {
         target = null;
         solution = null;
         misclickPending = false;
-        clickHoldTicks = 0;
     }
 
     // ---------------------------------------------------------------------
@@ -437,14 +444,17 @@ public final class BuilderStateMachine {
         if (now - lastReportMs < 5000L) return;
         lastReportMs = now;
 
-        double elapsedSec = (now - sessionStartMs) / 1000.0;
-        if (elapsedSec < 1.0 || placedCount == 0) return;
-
+        boolean schemLoaded = SchematicWorldHandler.getSchematicWorld() != null;
+        String scope = BuilderConfig.INSTANCE.buildBounds != null
+                ? "§a" + BuilderConfig.INSTANCE.selectedSchematic
+                : "§eall placements";
+        double elapsedSec = Math.max(0.001, (now - sessionStartMs) / 1000.0);
         double perMin = placedCount / (elapsedSec / 60.0);
-        double secPer = elapsedSec / placedCount;
+
         String msg = String.format(
-                "§bHumanBuilder §7| placed §f%d §7| §f%.1f§7/min | §f%.2fs§7/block | TPS §f%.1f§7 | %s",
-                placedCount, perMin, secPer, TPSMonitor.INSTANCE.getTps(), state);
+                "§b[HB] §f%s §7| placed §f%d §7(%.1f/min) §7| TPS §f%.1f §7| schem %s §7| %s",
+                state, placedCount, perMin, TPSMonitor.INSTANCE.getTps(),
+                schemLoaded ? "§aok" : "§cNULL", scope);
         player.sendMessage(Text.literal(msg), true);
     }
 
