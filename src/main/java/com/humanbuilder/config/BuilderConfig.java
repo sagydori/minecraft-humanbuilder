@@ -60,8 +60,10 @@ public final class BuilderConfig {
     public boolean showPath = true;
     /** Targets farther than this (blocks, eye→target) trigger NAVIGATING. */
     public double navReach = 3.5;
-    /** Maximum drop height A* will path down in one step. */
-    public int maxFallDistance = 3;
+    /** Maximum drop height A* will path down in one step. Kept at 1 so every
+     *  descent is reversible (a 1-block jump back up) — it never drops into a
+     *  pit it can't climb out of. */
+    public int maxFallDistance = 1;
     /** Safety cap on A* node expansions (keeps it "lightweight"). */
     public int maxPathIterations = 4000;
     /** Camera turn rate while navigating, degrees per tick. */

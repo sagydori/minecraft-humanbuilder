@@ -246,38 +246,47 @@ public final class BuilderStateMachine {
 
         Vec3d eye = player.getEyePos();
 
-        // Pass A — group building: place everything reachable from where we stand
-        // right now before walking anywhere. Drains the local cluster (faster,
-        // less back-and-forth). Bounded so it can't get expensive.
+        // Layer-by-layer, bottom-up: work only the lowest layer that still has
+        // non-blacklisted blocks (cache is sorted Y-ascending, so the first
+        // non-blacklisted target's Y is the current layer).
+        int layerY = Integer.MIN_VALUE;
+        for (Target t : targetCache) {
+            if (!blacklisted(t.pos())) { layerY = t.pos().getY(); break; }
+        }
+        if (layerY == Integer.MIN_VALUE) {
+            if (!idleReported) {
+                message(client, "§eHumanBuilder idle — nothing to build ("
+                        + SchematicBridge.INSTANCE.getLastStats().summary() + ")");
+                idleReported = true;
+            }
+            return; // nothing to do (done, waiting on supports, or all blacklisted)
+        }
+        idleReported = false;
+
+        // Pass A — group building: place everything reachable on THIS layer from
+        // where we stand, before walking anywhere. Bounded so it stays cheap.
         int checked = 0;
         for (Target t : targetCache) {
+            if (t.pos().getY() > layerY) break;         // higher layers wait
+            if (t.pos().getY() != layerY || blacklisted(t.pos())) continue;
             if (checked++ >= 40) break;
-            if (blacklisted(t.pos())) continue;
             PlacementSolution s = BlockPlacementMath.solve(client.world, player, t.pos(), t.state(), HAND);
             if (s == null) continue;
             if (BlockPlacementMath.reachable(client.world, player, s)
                     && BlockPlacementMath.facingOkFrom(player, HAND, t.state(), s, eye)) {
-                idleReported = false;
                 beginBuild(t, s, now, false);
                 targetCache.remove(t);
                 return;
             }
         }
 
-        // Pass B — nothing reachable here; go to the nearest/lowest target.
+        // Pass B — nothing reachable on this layer; go to the nearest one on it.
         Target chosen = null;
         for (Target t : targetCache) {
+            if (t.pos().getY() != layerY) continue;
             if (!blacklisted(t.pos())) { chosen = t; break; }
         }
-        if (chosen == null) {
-            if (!idleReported) {
-                message(client, "§eHumanBuilder idle — nothing to build ("
-                        + SchematicBridge.INSTANCE.getLastStats().summary() + ")");
-                idleReported = true;
-            }
-            return; // nothing to do (done, waiting on supports, or all far/blacklisted)
-        }
-        idleReported = false;
+        if (chosen == null) return; // this layer's reachable work is done for now
 
         PlacementSolution sol = BlockPlacementMath.solve(
                 client.world, player, chosen.pos(), chosen.state(), HAND);
