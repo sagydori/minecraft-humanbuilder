@@ -58,20 +58,24 @@ public final class MaterialChecker {
         if (player == null || mc.world == null || placement == null) {
             return new Result(empty, false, false, 0, false, null);
         }
-        Box box = placement.getEclosingBox(); // upstream typo in the API name
+        // getEclosingBox() (upstream typo) returns Litematica's own Box type.
+        fi.dy.masa.litematica.selection.Box litBox = placement.getEclosingBox();
+        BlockPos c1 = litBox == null ? null : litBox.getPos1();
+        BlockPos c2 = litBox == null ? null : litBox.getPos2();
         WorldSchematic schem = SchematicWorldHandler.getSchematicWorld();
-        if (box == null || schem == null) {
-            return new Result(empty, false, false, 0, false, box);
+        if (c1 == null || c2 == null || schem == null) {
+            return new Result(empty, false, false, 0, false, null);
         }
+
+        int x0 = Math.min(c1.getX(), c2.getX()), x1 = Math.max(c1.getX(), c2.getX());
+        int y0 = Math.min(c1.getY(), c2.getY()), y1 = Math.max(c1.getY(), c2.getY());
+        int z0 = Math.min(c1.getZ(), c2.getZ()), z1 = Math.max(c1.getZ(), c2.getZ());
+        Box bounds = new Box(x0, y0, z0, x1 + 1, y1 + 1, z1 + 1);
 
         boolean creative = player.getAbilities().creativeMode;
 
         Map<Item, Integer> have = inventoryCounts(player);
         Map<Item, Integer> need = new HashMap<>();
-
-        int x0 = MathHelper.floor(box.minX), x1 = MathHelper.ceil(box.maxX) - 1;
-        int y0 = MathHelper.floor(box.minY), y1 = MathHelper.ceil(box.maxY) - 1;
-        int z0 = MathHelper.floor(box.minZ), z1 = MathHelper.ceil(box.maxZ) - 1;
 
         long scanned = 0;
         boolean truncated = false;
@@ -117,7 +121,7 @@ public final class MaterialChecker {
         }
         entries.sort(Comparator.comparing((Entry en) -> !en.ok()).thenComparing(Entry::name));
 
-        return new Result(entries, all, creative, scanned, truncated, box);
+        return new Result(entries, all, creative, scanned, truncated, bounds);
     }
 
     private static Map<Item, Integer> inventoryCounts(ClientPlayerEntity player) {
