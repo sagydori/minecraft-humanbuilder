@@ -184,11 +184,8 @@ public final class HumanAimController {
                 startPhase(player, Phase.CORRECTION, trueYaw, truePitch);
                 return false;
             }
-            // Settled: lock exactly onto the true target and collapse interpolation.
+            // Settled: lock exactly onto the true target.
             applyRotation(player, trueYaw, truePitch);
-            if (player instanceof SmoothRotation sr) {
-                sr.humanbuilder$syncPrevRotation();
-            }
             phase = Phase.IDLE;
             return true;
         }
@@ -196,12 +193,10 @@ public final class HumanAimController {
     }
 
     private void applyRotation(ClientPlayerEntity player, float yaw, float pitch) {
-        if (player instanceof SmoothRotation sr) {
-            sr.humanbuilder$setRotation(yaw, pitch);
-        } else {
-            player.setYaw(yaw);
-            player.setPitch(pitch);
-        }
+        // Per-tick deltas are small; the vanilla interpolation system smooths the
+        // camera on its own (the old prev-rotation fields were removed in 1.21.x).
+        player.setYaw(yaw);
+        player.setPitch(pitch);
     }
 
     // ---------------------------------------------------------------------
