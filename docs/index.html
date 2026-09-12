@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HumanBuilder — Litematica Auto-Builder for Minecraft 1.21.11</title>
+<meta name="description" content="A human-input-simulating Litematica schematic builder for Minecraft 1.21.11 (Fabric). Estimate how long your builds really take.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%236b4326'/%3E%3Crect width='16' height='7' fill='%235db85c'/%3E%3Crect y='5' width='16' height='2' fill='%234a9a4a'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0e13; --bg2:#0e1219; --panel:#151b24; --panel2:#1b222d;
+    --edge:#232c39; --text:#e7edf5; --muted:#93a0b4; --accent:#5db85c;
+    --accent-hi:#79d97b; --dirt:#7a4e2b; --dirt-hi:#9b6535; --danger:#e06c5a;
+    --shadow:0 10px 30px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:
+      radial-gradient(1100px 500px at 50% -140px, rgba(93,184,92,.16), transparent 60%),
+      linear-gradient(180deg,var(--bg),var(--bg2));
+    color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,sans-serif;
+    line-height:1.6;-webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent-hi);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1040px;margin:0 auto;padding-inline:22px}
+
+  /* pixel grid overlay */
+  .grid-bg{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.35;
+    background-image:
+      linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
+    background-size:34px 34px;mask-image:linear-gradient(180deg,#000,transparent 70%)}
+
+  /* nav */
+  nav{display:flex;align-items:center;justify-content:space-between;padding:20px 0}
+  .brand{display:flex;align-items:center;gap:12px;font-weight:800;letter-spacing:.2px}
+  .cube{width:30px;height:30px;border-radius:5px;box-shadow:var(--shadow);
+    background:linear-gradient(180deg,var(--accent) 0 46%,#4a9a4a 46% 56%,var(--dirt) 56% 100%);
+    image-rendering:pixelated;border:2px solid rgba(0,0,0,.35)}
+  .nav-links{display:flex;gap:22px;font-size:14px;color:var(--muted);font-weight:600}
+  .nav-links a{color:var(--muted)} .nav-links a:hover{color:var(--text);text-decoration:none}
+
+  /* hero */
+  header{padding:46px 0 30px;text-align:center}
+  .badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:22px}
+  .badge{font-size:12px;font-weight:700;color:var(--muted);background:var(--panel);
+    border:1px solid var(--edge);border-radius:999px;padding:6px 12px}
+  .badge b{color:var(--accent-hi)}
+  h1{font-family:'Press Start 2P',monospace;font-size:clamp(26px,5.2vw,50px);
+    line-height:1.25;margin:6px 0 4px;text-shadow:0 3px 0 rgba(0,0,0,.4)}
+  h1 .g{color:var(--accent)}
+  .tag{font-size:clamp(15px,2.4vw,20px);color:var(--muted);max-width:640px;margin:12px auto 0}
+  .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:30px}
+  .btn{display:inline-flex;align-items:center;gap:10px;font-weight:800;font-size:16px;
+    padding:15px 26px;border-radius:12px;border:1px solid transparent;cursor:pointer;transition:.15s}
+  .btn-primary{background:linear-gradient(180deg,var(--accent-hi),var(--accent));color:#06240a;
+    box-shadow:0 6px 0 #3f8b3f,var(--shadow)}
+  .btn-primary:hover{transform:translateY(-2px);text-decoration:none;box-shadow:0 8px 0 #3f8b3f,var(--shadow)}
+  .btn-primary:active{transform:translateY(2px);box-shadow:0 3px 0 #3f8b3f}
+  .btn-ghost{background:var(--panel);border-color:var(--edge);color:var(--text)}
+  .btn-ghost:hover{background:var(--panel2);text-decoration:none;transform:translateY(-2px)}
+  .dl-note{margin-top:12px;font-size:13px;color:var(--muted)}
+  .dl-note code{background:var(--panel);border:1px solid var(--edge);padding:2px 7px;border-radius:6px;color:var(--accent-hi)}
+
+  section{padding:34px 0}
+  h2{font-family:'Press Start 2P',monospace;font-size:16px;color:var(--text);
+    margin:0 0 22px;letter-spacing:.3px}
+  h2 .n{color:var(--accent)}
+
+  /* feature cards */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--edge);
+    border-radius:14px;padding:20px;box-shadow:var(--shadow)}
+  .card .ic{font-size:22px;margin-bottom:10px}
+  .card h3{margin:0 0 6px;font-size:16px}
+  .card p{margin:0;color:var(--muted);font-size:14px}
+
+  /* requirements + steps */
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--edge);
+    border-radius:16px;padding:26px;box-shadow:var(--shadow)}
+  .req{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}
+  .req .pill{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--edge);
+    border-radius:10px;padding:10px 14px;font-weight:600;font-size:14px}
+  .req .pill span{color:var(--accent-hi)}
+  ol.steps{counter-reset:s;list-style:none;padding:0;margin:0;display:grid;gap:14px}
+  ol.steps li{counter-increment:s;position:relative;padding-left:52px;color:var(--muted)}
+  ol.steps li::before{content:counter(s);position:absolute;left:0;top:-2px;width:34px;height:34px;
+    display:grid;place-items:center;font-family:'Press Start 2P',monospace;font-size:12px;
+    color:#06240a;background:var(--accent);border-radius:9px;box-shadow:0 3px 0 #3f8b3f}
+  ol.steps li b{color:var(--text)}
+  code.k{background:var(--bg);border:1px solid var(--edge);padding:2px 7px;border-radius:6px;color:var(--accent-hi);font-size:13px}
+
+  .note{border-left:3px solid var(--accent);background:rgba(93,184,92,.06);
+    border-radius:0 12px 12px 0;padding:16px 18px;color:var(--muted);font-size:14px}
+  .note b{color:var(--text)}
+
+  footer{border-top:1px solid var(--edge);margin-top:20px;padding:28px 0 50px;color:var(--muted);font-size:13px;text-align:center}
+  footer a{color:var(--muted);font-weight:600}
+  .disclaim{max-width:720px;margin:10px auto 0;font-size:12px;opacity:.8}
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div class="wrap">
+
+  <nav>
+    <div class="brand"><div class="cube"></div> HumanBuilder</div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/sagydori/minecraft-humanbuilder">GitHub</a>
+    </div>
+  </nav>
+
+  <header>
+    <div class="badges">
+      <div class="badge">Minecraft <b>1.21.11</b></div>
+      <div class="badge">Loader <b>Fabric</b></div>
+      <div class="badge">Client-side <b>only</b></div>
+      <div class="badge"><b>No</b> packet injection</div>
+    </div>
+    <h1>Human<span class="g">Builder</span></h1>
+    <p class="tag">An autonomous Litematica schematic builder that places blocks like a real
+      player — natural aim, human timing, lag-aware — so you can <b>estimate how long a build
+      actually takes</b>.</p>
+
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/sagydori/minecraft-humanbuilder/releases/latest/download/humanbuilder-1.0.0.jar">
+        ⬇ Download .jar
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/sagydori/minecraft-humanbuilder/releases/latest">All releases</a>
+      <a class="btn btn-ghost" href="https://github.com/sagydori/minecraft-humanbuilder">Source code</a>
+    </div>
+    <div class="dl-note">Latest build · always points to the newest jar · pair with the mods below</div>
+  </header>
+
+  <section id="features">
+    <h2><span class="n">#</span> What it does</h2>
+    <div class="grid">
+      <div class="card"><div class="ic">🎯</div><h3>Natural aim</h3>
+        <p>Fitts's-law timing, quintic Bézier smoothing, dual-sine micro-tremor, overshoot-and-correct, and mouse-sensitivity quantization.</p></div>
+      <div class="card"><div class="ic">🎲</div><h3>Human timing</h3>
+        <p>Box–Muller Gaussian click delays, gradual fatigue that slows you down over time, plus occasional hesitation and misclicks.</p></div>
+      <div class="card"><div class="ic">📉</div><h3>Lag-aware</h3>
+        <p>Measures live TPS and scales every delay by 20 ⁄ TPS — and fully pauses when the server can't keep up, then resumes.</p></div>
+      <div class="card"><div class="ic">🧱</div><h3>Correct placement</h3>
+        <p>Validates every block against vanilla's own placement logic — slabs, stairs, pillars and directional blocks land right.</p></div>
+      <div class="card"><div class="ic">📐</div><h3>Litematica bridge</h3>
+        <p>Reads your placed schematic, builds bottom-up nearest-first, and only places blocks you actually have in your inventory.</p></div>
+      <div class="card"><div class="ic">⏱️</div><h3>Build-time estimate</h3>
+        <p>Live readout of blocks placed, blocks/min, seconds/block, TPS and fatigue — the whole point of the tool.</p></div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2><span class="n">#</span> Requirements</h2>
+    <div class="panel">
+      <p style="margin:0 0 12px;color:var(--muted)">Install these Fabric mods for <b>Minecraft 1.21.11</b> alongside HumanBuilder:</p>
+      <div class="req">
+        <div class="pill"><span>▸</span> Fabric API</div>
+        <div class="pill"><span>▸</span> Litematica <small>(sakura-ryoko 0.26.11+)</small></div>
+        <div class="pill"><span>▸</span> malilib</div>
+        <div class="pill"><span>▸</span> Cloth Config <small>(optional)</small></div>
+        <div class="pill"><span>▸</span> Mod Menu <small>(optional)</small></div>
+      </div>
+    </div>
+
+    <div style="height:22px"></div>
+    <h2><span class="n">#</span> Setup</h2>
+    <div class="panel">
+      <ol class="steps">
+        <li>Download <b>humanbuilder-1.0.0.jar</b> with the green button above.</li>
+        <li>Drop it into your <code class="k">.minecraft/mods</code> folder, together with Fabric API, Litematica and malilib.</li>
+        <li>Launch Minecraft <b>1.21.11</b> with the Fabric loader profile.</li>
+        <li>Load a schematic in Litematica and <b>place</b> it where you want to build.</li>
+        <li>Stand within ~4 blocks, with the needed blocks in your inventory, and press <code class="k">B</code> to toggle.</li>
+        <li>Read the action-bar: <b>placed · N/min · s/block · TPS · fatigue</b> — that's your estimate.</li>
+      </ol>
+    </div>
+
+    <div style="height:22px"></div>
+    <div class="note">
+      <b>Made for personal use.</b> HumanBuilder is built for singleplayer and your own server, to
+      estimate manual build time. It's client-side and never fabricates packets — it only drives the
+      same key/mouse inputs you would. There's no anti-cheat to defeat in those worlds; the
+      human-like imperfection exists to make the time estimate realistic (and recordings look natural).
+    </div>
+  </section>
+
+  <footer class="wrap">
+    <div>
+      <a href="https://github.com/sagydori/minecraft-humanbuilder">GitHub</a> ·
+      <a href="https://github.com/sagydori/minecraft-humanbuilder/releases/latest">Releases</a> ·
+      <a href="https://github.com/sagydori/minecraft-humanbuilder/blob/main/LICENSE">MIT License</a>
+    </div>
+    <p class="disclaim">Not affiliated with Mojang, Microsoft, Litematica or Fabric. Minecraft is a trademark of Mojang Studios.
+      Built automatically from source by GitHub Actions.</p>
+  </footer>
+
+</div>
+</body>
+</html>
