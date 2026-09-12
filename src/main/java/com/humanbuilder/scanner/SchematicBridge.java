@@ -22,17 +22,10 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Module F — The Litematica Bridge.
- *
- * <p>Reads the placed schematic via Litematica's public
- * {@link SchematicWorldHandler#getSchematicWorld()} (a {@link WorldSchematic}
- * that extends {@code net.minecraft.world.World}, so {@code getBlockState} is the
- * ordinary Minecraft accessor). Scans a spherical radius from the eye and returns
- * placeable targets, prioritised lowest-Y first (build bottom-up) then nearest.</p>
- *
- * <p>A target qualifies when: the schematic has a non-air block there that differs
- * from the real world; the real block is air/replaceable (we never break blocks);
- * a solid anchor exists in the real world; and the player holds the item.</p>
+ * Module F — The Litematica Bridge. Scans a spherical radius from the eye and
+ * returns placeable targets (lowest-Y first, then nearest). Also records a
+ * breakdown of why blocks were skipped, surfaced in the status line for
+ * diagnosis.
  */
 public final class SchematicBridge {
 
@@ -40,12 +33,38 @@ public final class SchematicBridge {
 
     private SchematicBridge() {}
 
+    /** Diagnostic counts from the most recent scan. */
+    public static final class ScanStats {
+        public boolean schemNull;
+        public int seen, alreadyOk, occupied, noItem, noAnchor, outOfBounds, selfBody, doubleHalf, candidates;
+
+        public String summary() {
+            if (schemNull) return "schem=NULL (no Litematica schematic world)";
+            if (seen == 0) return "no schematic blocks in range";
+            return "seen " + seen + " | ok " + alreadyOk + " | occ " + occupied
+                    + " | noItem " + noItem + " | noAnchor " + noAnchor
+                    + " | oob " + outOfBounds + " | cand " + candidates;
+        }
+    }
+
+    private volatile ScanStats lastStats = new ScanStats();
+
+    public ScanStats getLastStats() {
+        return lastStats;
+    }
+
     public List<Target> scan(MinecraftClient client) {
+        ScanStats st = new ScanStats();
         ClientPlayerEntity player = client.player;
         ClientWorld real = client.world;
         WorldSchematic schem = SchematicWorldHandler.getSchematicWorld();
-        if (player == null || real == null || schem == null) return List.of();
+        if (player == null || real == null || schem == null) {
+            st.schemNull = true;
+            lastStats = st;
+            return List.of();
+        }
 
+        boolean creative = player.getAbilities().creativeMode;
         Vec3d eye = player.getEyePos();
         double radius = BuilderConfig.INSTANCE.scanRadius;
         double radiusSq = radius * radius;
@@ -69,47 +88,51 @@ public final class SchematicBridge {
                     double ey = pos.getY() + 0.5 - eye.y;
                     double ez = pos.getZ() + 0.5 - eye.z;
                     if (ex * ex + ey * ey + ez * ez > radiusSq) continue;
-
                     if (!chunkManager.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) continue;
 
                     BlockState want = schem.getBlockState(pos);
                     if (want.isAir()) continue;
+                    st.seen++;
 
-                    // Restrict to the chosen placement's bounds, if the menu set one.
                     if (BuilderConfig.INSTANCE.buildBounds != null
                             && !BuilderConfig.INSTANCE.buildBounds.contains(
                                     pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5)) {
+                        st.outOfBounds++;
                         continue;
                     }
 
-                    // Don't place a block into the player's own body.
-                    if (pos.equals(feet) || pos.equals(feet.up())) continue;
+                    // Never place into the player's own body (feet/head cells).
+                    if (pos.equals(feet) || pos.equals(feet.up())) { st.selfBody++; continue; }
 
-                    // Skip the auto-generated secondary half of double blocks
-                    // (door top, bed head, tall plant top) — placing the base
-                    // spawns both halves; targeting the top would double-place.
-                    if (want.contains(Properties.DOUBLE_BLOCK_HALF)
-                            && want.get(Properties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER) continue;
-                    if (want.contains(Properties.BED_PART)
-                            && want.get(Properties.BED_PART) == BedPart.HEAD) continue;
+                    // Skip auto-generated second halves of double blocks.
+                    if ((want.contains(Properties.DOUBLE_BLOCK_HALF)
+                            && want.get(Properties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER)
+                            || (want.contains(Properties.BED_PART)
+                            && want.get(Properties.BED_PART) == BedPart.HEAD)) {
+                        st.doubleHalf++;
+                        continue;
+                    }
 
                     BlockState have = real.getBlockState(pos);
-                    if (have == want) continue;                       // already correct
-                    if (!have.isAir() && !have.isReplaceable()) continue; // occupied by wrong block — skip
+                    if (have == want) { st.alreadyOk++; continue; }
+                    if (!have.isAir() && !have.isReplaceable()) { st.occupied++; continue; }
 
                     Item item = want.getBlock().asItem();
-                    if (item == Items.AIR) continue;                  // no obtainable item (e.g. fluids)
-                    if (!hasItem(player.getInventory(), item)) continue;
-                    if (!hasAnchor(real, pos)) continue;
+                    if (item == Items.AIR) { st.noItem++; continue; }
+                    // Survival needs the item in inventory; creative can grab it.
+                    if (!creative && !hasItem(player.getInventory(), item)) { st.noItem++; continue; }
+                    if (!hasAnchor(real, pos)) { st.noAnchor++; continue; }
 
+                    st.candidates++;
                     out.add(new Target(pos.toImmutable(), want));
                 }
             }
         }
 
         out.sort(Comparator
-                .comparingInt((Target t) -> t.pos().getY())          // 1) lowest Y first
-                .thenComparingDouble(t -> horizontalDistSq(t.pos(), eye))); // 2) nearest horizontally
+                .comparingInt((Target t) -> t.pos().getY())
+                .thenComparingDouble(t -> horizontalDistSq(t.pos(), eye)));
+        lastStats = st;
         return out;
     }
 

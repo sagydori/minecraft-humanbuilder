@@ -13,7 +13,6 @@ import com.humanbuilder.scanner.SchematicBridge;
 import com.humanbuilder.scanner.Target;
 import com.humanbuilder.stochastic.StochasticEngine;
 import com.humanbuilder.util.InputSimulator;
-import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.text.Text;
@@ -444,17 +443,16 @@ public final class BuilderStateMachine {
         if (now - lastReportMs < 5000L) return;
         lastReportMs = now;
 
-        boolean schemLoaded = SchematicWorldHandler.getSchematicWorld() != null;
         String scope = BuilderConfig.INSTANCE.buildBounds != null
                 ? "§a" + BuilderConfig.INSTANCE.selectedSchematic
-                : "§eall placements";
-        double elapsedSec = Math.max(0.001, (now - sessionStartMs) / 1000.0);
-        double perMin = placedCount / (elapsedSec / 60.0);
-
+                : "§eall";
+        // When nothing has been placed yet, show why (scan breakdown) for diagnosis.
+        String extra = placedCount == 0
+                ? " §7| §f" + SchematicBridge.INSTANCE.getLastStats().summary()
+                : "";
         String msg = String.format(
-                "§b[HB] §f%s §7| placed §f%d §7(%.1f/min) §7| TPS §f%.1f §7| schem %s §7| %s",
-                state, placedCount, perMin, TPSMonitor.INSTANCE.getTps(),
-                schemLoaded ? "§aok" : "§cNULL", scope);
+                "§b[HB] §f%s §7| placed §f%d §7| TPS §f%.1f §7| %s%s",
+                state, placedCount, TPSMonitor.INSTANCE.getTps(), scope, extra);
         player.sendMessage(Text.literal(msg), true);
     }
 

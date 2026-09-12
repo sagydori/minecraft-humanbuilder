@@ -77,7 +77,16 @@ public final class InventoryManager {
             return Status.WORKING;
         }
 
-        // 4) Unavailable.
+        // 4) Creative: grab it straight into the held hotbar slot.
+        if (player.getAbilities().creativeMode) {
+            int destHotbar = getSelectedSlot(inv);
+            // Player-screen-handler slot for hotbar index 0..8 is 36..44.
+            client.interactionManager.clickCreativeStack(new ItemStack(target), 36 + destHotbar);
+            nextActionMs = now + (long) (50 + StochasticEngine.INSTANCE.raw().nextDouble() * 50);
+            return Status.WORKING;
+        }
+
+        // 5) Unavailable.
         throw new MissingItemException(target);
     }
 
