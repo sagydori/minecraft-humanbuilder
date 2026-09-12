@@ -74,6 +74,21 @@ public final class BlockPlacementMath {
             Direction.EAST, Direction.WEST, Direction.UP
     };
 
+    /**
+     * Candidate (look, horizontal-facing) pairs searched to reproduce a block's
+     * orientation. Horizontal looks pair with themselves; vertical looks pair with
+     * each horizontal facing (for the rotation of up/down-oriented blocks such as
+     * crafters). Covers FACING, HORIZONTAL_FACING, AXIS and ORIENTATION.
+     */
+    private static final Direction[][] ORIENT_COMBOS = {
+            {Direction.NORTH, Direction.NORTH}, {Direction.SOUTH, Direction.SOUTH},
+            {Direction.EAST, Direction.EAST}, {Direction.WEST, Direction.WEST},
+            {Direction.UP, Direction.NORTH}, {Direction.UP, Direction.SOUTH},
+            {Direction.UP, Direction.EAST}, {Direction.UP, Direction.WEST},
+            {Direction.DOWN, Direction.NORTH}, {Direction.DOWN, Direction.SOUTH},
+            {Direction.DOWN, Direction.EAST}, {Direction.DOWN, Direction.WEST}
+    };
+
     /** Planar sub-pixel offsets to try, all inside [0.15, 0.85]. */
     private static final double[] PLANAR_OFFSETS = {0.5, 0.3, 0.7, 0.2, 0.8};
 
@@ -114,17 +129,21 @@ public final class BlockPlacementMath {
             if (!anchorState.getFluidState().isEmpty()) continue;
             if (!anchorState.isSideSolidFullSquare(world, anchor, side)) continue;
 
+            ItemStack stack = new ItemStack(schematic.getBlock().asItem());
             for (Vec3d hit : hitCandidates(anchor, side, schematic)) {
                 BlockHitResult bhr = new BlockHitResult(hit, side, anchor, false);
-                ItemPlacementContext ctx = new ItemPlacementContext(new ItemUsageContext(player, hand, bhr));
-                if (!ctx.canPlace()) continue;
-                BlockState placed = schematic.getBlock().getPlacementState(ctx);
-                // Geometry only here: block type + axis + slab/stair half must match.
-                // FACING is position/look dependent and is checked by facingOkFrom()
-                // once we know where the player stands.
-                if (matches(placed, schematic, false)) {
-                    boolean sneak = isInteractable(anchorState);
-                    return new PlacementSolution(anchor, side, hit, sneak);
+                // Search look/facing combos so we pick an anchor face for which the
+                // exact orientation (facing/axis/ORIENTATION) is achievable. The
+                // actual standing side is then chosen by facingOkFrom().
+                for (Direction[] combo : ORIENT_COMBOS) {
+                    ItemPlacementContext ctx = new OrientedPlacementContext(
+                            player, hand, stack, bhr, combo[0], combo[1]);
+                    if (!ctx.canPlace()) continue;
+                    BlockState placed = schematic.getBlock().getPlacementState(ctx);
+                    if (matches(placed, schematic, true)) {
+                        boolean sneak = isInteractable(anchorState);
+                        return new PlacementSolution(anchor, side, hit, sneak);
+                    }
                 }
             }
         }
