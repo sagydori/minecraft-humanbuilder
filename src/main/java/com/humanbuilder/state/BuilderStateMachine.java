@@ -172,9 +172,11 @@ public final class BuilderStateMachine {
                 continue;
             }
 
-            // Only build if we can actually reach it (in range + clear line of
-            // sight). Otherwise walk to a spot that can — never place through walls.
-            if (BlockPlacementMath.reachable(client.world, player, sol)) {
+            // Build only if we can reach it (range + clear LOS + not into our own
+            // body) AND looking at it from here yields the correct facing.
+            boolean canBuildHere = BlockPlacementMath.reachable(client.world, player, sol)
+                    && BlockPlacementMath.facingOkFrom(player, HAND, t.state(), sol, player.getEyePos());
+            if (canBuildHere) {
                 this.target = t;
                 this.solution = sol;
                 this.misclickPending = StochasticEngine.INSTANCE.rollMisclick();
@@ -184,22 +186,28 @@ public final class BuilderStateMachine {
                 return;
             }
 
-            if (cfg.enableNavigation && startNavigation(client, player, t.pos())) {
+            // Otherwise walk to a spot that can see it from the correct side.
+            if (cfg.enableNavigation && startNavigation(client, player, t, sol)) {
                 navTarget = t.pos();
                 recoveryAttempts = 0;
                 state = State.NAVIGATING;
                 return;
             }
 
-            // Can't reach and can't path to it — skip for a while.
+            // Can't reach/orient and can't path to it — skip for a while.
             blacklist(t.pos(), 15_000);
         }
         // Nothing actionable this tick; remain SCANNING.
     }
 
-    private boolean startNavigation(MinecraftClient client, ClientPlayerEntity player, BlockPos target) {
+    private boolean startNavigation(MinecraftClient client, ClientPlayerEntity player,
+                                    Target t, PlacementSolution sol) {
+        // Require a standing spot from which looking at the target gives the right
+        // facing (so directional blocks come out correct after we walk there).
+        java.util.function.Predicate<Vec3d> eyeOk =
+                eye -> BlockPlacementMath.facingOkFrom(player, HAND, t.state(), sol, eye);
         BlockPos stand = Pathfinder.findStandingPosition(
-                client.world, target, player.getBlockPos(), BuilderConfig.INSTANCE.navReach);
+                client.world, t.pos(), player.getBlockPos(), BuilderConfig.INSTANCE.navReach, eyeOk);
         if (stand == null) return false;
         if (player.getBlockPos().equals(stand)) {
             NavigationController.INSTANCE.setPath(List.of());
@@ -240,8 +248,11 @@ public final class BuilderStateMachine {
         BlockState want = schem.getBlockState(nt);
         if (want.isAir()) return;
         PlacementSolution sol = BlockPlacementMath.solve(client.world, player, nt, want, HAND);
-        if (sol == null || !BlockPlacementMath.reachable(client.world, player, sol)) {
-            blacklist(nt, 12_000);
+        boolean canBuild = sol != null
+                && BlockPlacementMath.reachable(client.world, player, sol)
+                && BlockPlacementMath.facingOkFrom(player, HAND, want, sol, player.getEyePos());
+        if (!canBuild) {
+            blacklist(nt, 12_000); // arrived but still can't build it correctly
         }
     }
 
@@ -254,7 +265,7 @@ public final class BuilderStateMachine {
         recoveryTicks = 0;
         recoveryAttempts++;
 
-        if (navTarget == null || recoveryAttempts > 2 || !startNavigation(client, player, navTarget)) {
+        if (navTarget == null || recoveryAttempts > 2 || !renavigate(client, player, navTarget)) {
             blacklist(navTarget, 20_000);
             navTarget = null;
             recoveryAttempts = 0;
@@ -262,6 +273,17 @@ public final class BuilderStateMachine {
         } else {
             state = State.NAVIGATING;
         }
+    }
+
+    /** Re-solve the schematic block at {@code nt} and start navigating to it. */
+    private boolean renavigate(MinecraftClient client, ClientPlayerEntity player, BlockPos nt) {
+        var schem = SchematicWorldHandler.getSchematicWorld();
+        if (schem == null) return false;
+        BlockState want = schem.getBlockState(nt);
+        if (want.isAir()) return false;
+        PlacementSolution sol = BlockPlacementMath.solve(client.world, player, nt, want, HAND);
+        if (sol == null) return false;
+        return startNavigation(client, player, new Target(nt, want), sol);
     }
 
     // ---------------------------------------------------------------------
@@ -297,16 +319,12 @@ public final class BuilderStateMachine {
     private void beginAimAtSolution(MinecraftClient client) {
         ClientPlayerEntity player = client.player;
         if (player == null || solution == null) return;
-        if (solution.requiredYaw() != null) {
-            // Directional block: face the direction that yields the correct facing.
-            float yaw = solution.requiredYaw();
-            float pitch = solution.requiredPitch() != null ? solution.requiredPitch() : player.getPitch();
-            HumanAimController.INSTANCE.beginAim(player, yaw, pitch);
-        } else {
-            Vec3d eye = player.getEyePos();
-            float[] yp = HumanAimController.lookAt(eye, solution.hitVec());
-            HumanAimController.INSTANCE.beginAim(player, yp[0], yp[1]);
-        }
+        // Always look at the block being placed (natural, and — because we only
+        // build from a spot where looking at it yields the right facing — this
+        // also produces the correct orientation for directional blocks).
+        Vec3d eye = player.getEyePos();
+        float[] yp = HumanAimController.lookAt(eye, solution.targetCenter());
+        HumanAimController.INSTANCE.beginAim(player, yp[0], yp[1]);
     }
 
     private void tickAiming(MinecraftClient client) {

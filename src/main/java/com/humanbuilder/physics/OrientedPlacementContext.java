@@ -11,21 +11,23 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * An {@link ItemPlacementContext} whose "player look" is overridden to a chosen
- * direction. This lets us evaluate {@code Block.getPlacementState(...)} for each
- * candidate facing without actually rotating the player, so we can find the look
- * direction that reproduces a directional block's exact schematic state
- * (observers, chests, furnaces, droppers, pistons, stairs, logs, …). The state
- * machine then aims the real player to that direction before placing.
+ * An {@link ItemPlacementContext} whose "player look" and "horizontal facing" are
+ * overridden. This lets us evaluate {@code Block.getPlacementState(...)} as if the
+ * player were looking in a chosen direction — from any hypothetical viewpoint —
+ * without actually moving the player, so we can tell whether looking at a target
+ * from a given spot would produce the schematic's exact facing (observers, chests,
+ * furnaces, droppers, pistons, stairs, logs, hoppers, …).
  */
 public class OrientedPlacementContext extends ItemPlacementContext {
 
-    private final Direction look;
+    private final Direction look;      // full look direction (yaw+pitch), for 6-way FACING
+    private final Direction horizontal; // horizontal facing (yaw only), for HORIZONTAL_FACING
 
     public OrientedPlacementContext(PlayerEntity player, Hand hand, ItemStack stack,
-                                    BlockHitResult hit, Direction look) {
+                                    BlockHitResult hit, Direction look, Direction horizontal) {
         super(player, hand, stack, hit);
         this.look = look;
+        this.horizontal = horizontal.getAxis().isHorizontal() ? horizontal : Direction.NORTH;
     }
 
     @Override
@@ -35,12 +37,11 @@ public class OrientedPlacementContext extends ItemPlacementContext {
 
     @Override
     public Direction getHorizontalPlayerFacing() {
-        return look.getAxis().isHorizontal() ? look : Direction.NORTH;
+        return horizontal;
     }
 
     @Override
     public Direction[] getPlacementDirections() {
-        // Standard ordering with our look first and its opposite last.
         List<Direction> order = new ArrayList<>(6);
         order.add(look);
         for (Direction d : Direction.values()) {

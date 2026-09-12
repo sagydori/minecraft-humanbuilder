@@ -55,13 +55,18 @@ public final class BlockPlacementMath {
     private BlockPlacementMath() {}
 
     public record PlacementSolution(BlockPos anchorPos, Direction side, Vec3d hitVec,
-                                    boolean requiresSneak, Float requiredYaw, Float requiredPitch) {}
+                                    boolean requiresSneak) {
 
-    /** Candidate look directions searched to reproduce a directional block. */
-    private static final Direction[] LOOKS = {
-            Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST,
-            Direction.UP, Direction.DOWN
-    };
+        /** The world-space centre of the block being placed (what we look at). */
+        public Vec3d targetCenter() {
+            BlockPos p = anchorPos.offset(side);
+            return new Vec3d(p.getX() + 0.5, p.getY() + 0.5, p.getZ() + 0.5);
+        }
+
+        public BlockPos targetPos() {
+            return anchorPos.offset(side);
+        }
+    }
 
     /** Prefer building on the block below (bottom-up), then sides, then underside last. */
     private static final Direction[] APPROACH_ORDER = {
@@ -100,10 +105,6 @@ public final class BlockPlacementMath {
         BlockState existing = world.getBlockState(target);
         if (!existing.isAir() && !existing.isReplaceable()) return null;
 
-        boolean directional = needsOrientation(schematic);
-        Direction[] looks = directional ? LOOKS : new Direction[]{Direction.NORTH};
-        ItemStack stack = new ItemStack(schematic.getBlock().asItem());
-
         for (Direction approach : APPROACH_ORDER) {
             BlockPos anchor = target.offset(approach);
             Direction side = approach.getOpposite(); // face of the anchor pointing at the target
@@ -115,21 +116,39 @@ public final class BlockPlacementMath {
 
             for (Vec3d hit : hitCandidates(anchor, side, schematic)) {
                 BlockHitResult bhr = new BlockHitResult(hit, side, anchor, false);
-                for (Direction look : looks) {
-                    ItemPlacementContext ctx = new OrientedPlacementContext(player, hand, stack, bhr, look);
-                    if (!ctx.canPlace()) continue;
-                    BlockState placed = schematic.getBlock().getPlacementState(ctx);
-                    // Strict: the exact facing/axis must match (rotation ignored).
-                    if (matches(placed, schematic, true)) {
-                        boolean sneak = isInteractable(anchorState);
-                        Float yaw = directional ? yawFor(look) : null;
-                        Float pitch = directional ? pitchFor(look) : null;
-                        return new PlacementSolution(anchor, side, hit, sneak, yaw, pitch);
-                    }
+                ItemPlacementContext ctx = new ItemPlacementContext(new ItemUsageContext(player, hand, bhr));
+                if (!ctx.canPlace()) continue;
+                BlockState placed = schematic.getBlock().getPlacementState(ctx);
+                // Geometry only here: block type + axis + slab/stair half must match.
+                // FACING is position/look dependent and is checked by facingOkFrom()
+                // once we know where the player stands.
+                if (matches(placed, schematic, false)) {
+                    boolean sneak = isInteractable(anchorState);
+                    return new PlacementSolution(anchor, side, hit, sneak);
                 }
             }
         }
         return null;
+    }
+
+    /**
+     * Would looking at the target block from {@code eye} produce the schematic's
+     * exact facing? This is how we decide whether the builder can place a
+     * directional block from a given standing spot (and which side to walk to).
+     * For non-directional blocks this is always true.
+     */
+    public static boolean facingOkFrom(ClientPlayerEntity player, Hand hand,
+                                       BlockState schematic, PlacementSolution sol, Vec3d eye) {
+        Vec3d center = sol.targetCenter();
+        double dx = center.x - eye.x, dy = center.y - eye.y, dz = center.z - eye.z;
+        Direction look = Direction.getFacing(dx, dy, dz);
+        Direction horiz = Direction.getFacing(dx, 0.0, dz);
+        BlockHitResult bhr = new BlockHitResult(sol.hitVec(), sol.side(), sol.anchorPos(), false);
+        ItemStack stack = new ItemStack(schematic.getBlock().asItem());
+        OrientedPlacementContext ctx = new OrientedPlacementContext(player, hand, stack, bhr, look, horiz);
+        if (!ctx.canPlace()) return false;
+        BlockState placed = schematic.getBlock().getPlacementState(ctx);
+        return matches(placed, schematic, true); // strict: enforce facing
     }
 
     /**
@@ -257,28 +276,6 @@ public final class BlockPlacementMath {
             if (!placed.get(p).equals(schematic.get(p))) return false;
         }
         return true;
-    }
-
-    /** Does this block's state depend on how it's placed (facing/axis)? */
-    private static boolean needsOrientation(BlockState s) {
-        return s.contains(Properties.FACING)
-                || s.contains(Properties.HORIZONTAL_FACING)
-                || s.contains(Properties.AXIS)
-                || s.contains(Properties.HORIZONTAL_AXIS)
-                || s.contains(Properties.HOPPER_FACING);
-    }
-
-    /** Player yaw that produces the given look direction (horizontal only; 0 for up/down). */
-    private static Float yawFor(Direction look) {
-        if (look.getAxis().isVertical()) return 0.0f;
-        return (float) Math.toDegrees(Math.atan2(-look.getOffsetX(), look.getOffsetZ()));
-    }
-
-    /** Player pitch that produces the given look direction. */
-    private static Float pitchFor(Direction look) {
-        if (look == Direction.UP) return -90.0f;
-        if (look == Direction.DOWN) return 90.0f;
-        return 0.0f;
     }
 
     /** Heuristic: would clicking this block trigger a use action, requiring sneak to place? */

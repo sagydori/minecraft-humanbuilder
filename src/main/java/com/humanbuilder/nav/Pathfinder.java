@@ -210,6 +210,16 @@ public final class Pathfinder {
      * sight. Prefers the closest such cell, tie-broken by proximity to {@code from}.
      */
     public static BlockPos findStandingPosition(World world, BlockPos target, BlockPos from, double reach) {
+        return findStandingPosition(world, target, from, reach, null);
+    }
+
+    /**
+     * As above, but candidate cells must also satisfy {@code eyeOk} (given the
+     * cell's eye position) — used to require that looking at the target from the
+     * spot yields the correct block facing.
+     */
+    public static BlockPos findStandingPosition(World world, BlockPos target, BlockPos from,
+                                                double reach, java.util.function.Predicate<Vec3d> eyeOk) {
         BuilderConfig cfg = BuilderConfig.INSTANCE;
         int r = (int) Math.ceil(reach);
         Vec3d tc = Vec3d.ofCenter(target);
@@ -228,6 +238,7 @@ public final class Pathfinder {
                     double dist = eye.distanceTo(tc);
                     if (dist > reach) continue;
                     if (!lineOfSight(world, eye, tc, target)) continue;
+                    if (eyeOk != null && !eyeOk.test(eye)) continue;
 
                     double score = dist + cand.getSquaredDistance(from) * 0.01;
                     if (score < bestScore) {
