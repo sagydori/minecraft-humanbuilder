@@ -89,6 +89,10 @@ public final class BuilderStateMachine {
     private long lastLowHealthMsg;
     private boolean idleReported;
 
+    // Whole-build ETA.
+    private int remainingEstimate = -1;
+    private long lastCountMs;
+
     // --- Build-time estimation ---
     private long sessionStartMs = 0L;
     private int placedCount = 0;
@@ -102,6 +106,42 @@ public final class BuilderStateMachine {
 
     public State getState() {
         return state;
+    }
+
+    public boolean isActive() {
+        return controlling && BuilderConfig.INSTANCE.enabled;
+    }
+
+    /** Lines for the on-screen HUD (state, throughput, remaining, ETA). */
+    public java.util.List<String> statusLines() {
+        java.util.List<String> out = new java.util.ArrayList<>(5);
+        long now = System.currentTimeMillis();
+        double elapsedSec = Math.max(0.001, (now - sessionStartMs) / 1000.0);
+        double perMin = placedCount / (elapsedSec / 60.0);
+        double secPer = placedCount > 0 ? elapsedSec / placedCount : 0.0;
+
+        out.add("§b§lHumanBuilder §r§7" + state);
+        out.add("§7placed §f" + placedCount + " §7(§f" + String.format("%.1f", perMin) + "§7/min)");
+
+        String rem = remainingEstimate < 0 ? "…"
+                : (SchematicBridge.INSTANCE.lastRemainingCapped ? "≥" : "~") + remainingEstimate;
+        String eta = (placedCount >= 10 && remainingEstimate > 0)
+                ? fmtDuration((long) (remainingEstimate * secPer)) : "—";
+        out.add("§7remaining §f" + rem + "   §7ETA §f" + eta);
+
+        if (placedCount == 0) {
+            out.add("§8" + SchematicBridge.INSTANCE.getLastStats().summary());
+        }
+        out.add("§7TPS §f" + String.format("%.1f", TPSMonitor.INSTANCE.getTps())
+                + (BuilderConfig.INSTANCE.buildBounds != null
+                        ? "  §7| §a" + BuilderConfig.INSTANCE.selectedSchematic : ""));
+        return out;
+    }
+
+    private static String fmtDuration(long secs) {
+        if (secs < 0) secs = 0;
+        long h = secs / 3600, m = (secs % 3600) / 60, s = secs % 60;
+        return h > 0 ? String.format("%d:%02d:%02d", h, m, s) : String.format("%d:%02d", m, s);
     }
 
     // ---------------------------------------------------------------------
@@ -189,6 +229,12 @@ public final class BuilderStateMachine {
             return;
         } else if (state == State.PAUSED_LAG) {
             state = State.SCANNING;
+        }
+
+        // Periodically estimate remaining blocks for the whole-build ETA.
+        if (now - lastCountMs > 15_000L) {
+            remainingEstimate = SchematicBridge.INSTANCE.countRemaining(client);
+            lastCountMs = now;
         }
 
         // Watchdog: if there is work but no placement progress for a while, we are
@@ -661,6 +707,8 @@ public final class BuilderStateMachine {
         errorCount = 0;
         lastProgressMs = System.currentTimeMillis();
         unstickUntil = 0L;
+        remainingEstimate = -1;
+        lastCountMs = 0L;
         StochasticEngine.INSTANCE.onActivate();
         state = State.SCANNING;
     }
@@ -718,6 +766,7 @@ public final class BuilderStateMachine {
 
     private void maybeReportEstimate(MinecraftClient client, ClientPlayerEntity player) {
         if (!BuilderConfig.INSTANCE.reportEstimate) return;
+        if (BuilderConfig.INSTANCE.showHud) return; // HUD shows this instead
         long now = System.currentTimeMillis();
         if (now - lastReportMs < 5000L) return;
         lastReportMs = now;

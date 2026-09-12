@@ -34,7 +34,9 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setMin(8.0).setMax(512.0).setSaveConsumer(v -> cfg.scanRadius = v).build());
         general.addEntry(eb.startBooleanToggle(Text.literal("Block user input while active"), cfg.blockUserInput)
                 .setSaveConsumer(v -> cfg.blockUserInput = v).build());
-        general.addEntry(eb.startBooleanToggle(Text.literal("Report build-rate estimate"), cfg.reportEstimate)
+        general.addEntry(eb.startBooleanToggle(Text.literal("Show HUD overlay"), cfg.showHud)
+                .setSaveConsumer(v -> cfg.showHud = v).build());
+        general.addEntry(eb.startBooleanToggle(Text.literal("Action-bar status (if HUD off)"), cfg.reportEstimate)
                 .setSaveConsumer(v -> cfg.reportEstimate = v).build());
 
         ConfigCategory aim = builder.getOrCreateCategory(Text.literal("Aim realism"));

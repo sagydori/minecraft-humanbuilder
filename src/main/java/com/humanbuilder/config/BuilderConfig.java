@@ -82,7 +82,9 @@ public final class BuilderConfig {
     public transient String selectedSchematic = null;
 
     // --- Safety / debug ---
-    /** If true, log the estimated remaining time to chat periodically. */
+    /** Show the on-screen HUD overlay (state, throughput, remaining, ETA). */
+    public boolean showHud = true;
+    /** If true (and HUD off), print status to the action bar periodically. */
     public boolean reportEstimate = true;
 
     // ---------------------------------------------------------------------

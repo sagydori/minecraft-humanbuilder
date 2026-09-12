@@ -127,6 +127,45 @@ public final class SchematicBridge {
         return out;
     }
 
+    /** Total blocks still needing placement in the whole schematic (for ETA). Approximate if capped. */
+    public volatile boolean lastRemainingCapped;
+
+    public int countRemaining(MinecraftClient client) {
+        ClientPlayerEntity player = client.player;
+        ClientWorld real = client.world;
+        WorldSchematic schem = SchematicWorldHandler.getSchematicWorld();
+        lastRemainingCapped = false;
+        if (player == null || real == null || schem == null) return -1;
+
+        int[] r = region(player);
+        var chunkManager = schem.getChunkManager();
+        BlockPos.Mutable pos = new BlockPos.Mutable();
+        long iterations = 0;
+        long cap = 600_000L;
+        int count = 0;
+
+        for (int y = r[1]; y <= r[4]; y++) {
+            for (int x = r[0]; x <= r[3]; x++) {
+                for (int z = r[2]; z <= r[5]; z++) {
+                    if (++iterations > cap) { lastRemainingCapped = true; return count; }
+                    pos.set(x, y, z);
+                    if (!chunkManager.isChunkLoaded(x >> 4, z >> 4)) continue;
+                    BlockState want = schem.getBlockState(pos);
+                    if (want.isAir()) continue;
+                    if ((want.contains(Properties.DOUBLE_BLOCK_HALF)
+                            && want.get(Properties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER)
+                            || (want.contains(Properties.BED_PART)
+                            && want.get(Properties.BED_PART) == BedPart.HEAD)) continue;
+                    BlockState have = real.getBlockState(pos);
+                    if (have == want) continue;
+                    if (!have.isAir() && !have.isReplaceable()) continue;
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
     /** Region [x0,y0,z0,x1,y1,z1] to scan: chosen bounds, else all placements, else a box near the player. */
     private static int[] region(ClientPlayerEntity player) {
         Box b = BuilderConfig.INSTANCE.buildBounds;
