@@ -67,6 +67,12 @@ public final class BuilderConfig {
     /** Camera turn rate while navigating, degrees per tick. */
     public double turnSpeedDegPerTick = 22.0;
 
+    // --- Scaffolding (temporary staircase to reach higher layers) ---
+    /** Build a temporary staircase when an upper target can't be reached/pathed to. */
+    public boolean enableScaffolding = true;
+    /** Safety cap on scaffold blocks placed per activation. */
+    public int maxScaffoldBlocks = 64;
+
     // --- Schematic selection (set by the in-game menu) ---
     /** If non-null, only build blocks inside this world-space box (the chosen placement). */
     public net.minecraft.util.math.Box buildBounds = null;

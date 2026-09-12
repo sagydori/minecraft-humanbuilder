@@ -6,6 +6,7 @@ import com.humanbuilder.inventory.InventoryManager;
 import com.humanbuilder.inventory.MissingItemException;
 import com.humanbuilder.nav.NavigationController;
 import com.humanbuilder.nav.Pathfinder;
+import com.humanbuilder.nav.Scaffolder;
 import com.humanbuilder.network.TPSMonitor;
 import com.humanbuilder.physics.BlockPlacementMath;
 import com.humanbuilder.physics.BlockPlacementMath.PlacementSolution;
@@ -61,6 +62,11 @@ public final class BuilderStateMachine {
     // Full-schematic target cache.
     private final java.util.List<Target> targetCache = new java.util.ArrayList<>();
     private long lastScanMs = 0L;
+
+    // Scaffolding.
+    private boolean buildingScaffold;
+    private BlockPos scaffoldGoal;
+    private int scaffoldAttempts;
 
     /** Temporary skip-lists keyed by BlockPos.asLong() → expiry epoch-ms / fail count. */
     private final Map<Long, Long> blacklistUntil = new HashMap<>();
@@ -192,28 +198,79 @@ public final class BuilderStateMachine {
         boolean canBuildHere = BlockPlacementMath.reachable(client.world, player, sol)
                 && BlockPlacementMath.facingOkFrom(player, HAND, chosen.state(), sol, player.getEyePos());
         if (canBuildHere) {
-            this.target = chosen;
-            this.solution = sol;
-            this.misclickPending = StochasticEngine.INSTANCE.rollMisclick();
-            InventoryManager.INSTANCE.begin(chosen.state().getBlock().asItem());
-            fetchStartMs = now;
+            beginBuild(chosen, sol, now, false);
             targetCache.remove(chosen);
-            state = State.FETCHING_ITEM;
             return;
         }
 
         // Not buildable from here — walk to it (even if far; partial paths make
         // progress, and we re-plan on arrival).
         if (cfg.enableNavigation && startNavigation(client, player, chosen, sol)) {
+            Scaffolder.INSTANCE.reset();
+            scaffoldGoal = null;
             navTarget = chosen.pos();
             recoveryAttempts = 0;
             state = State.NAVIGATING;
             return;
         }
 
-        // Can't reach/orient and can't path to it — skip it for a while.
+        // Can't reach or path to it (usually too high) — build a staircase up.
+        if (tryScaffold(client, player, chosen)) return;
+
+        // Nothing we can do with it right now.
         blacklist(chosen.pos(), 15_000);
         targetCache.remove(chosen);
+    }
+
+    private void beginBuild(Target t, PlacementSolution sol, long now, boolean scaffold) {
+        this.target = t;
+        this.solution = sol;
+        this.buildingScaffold = scaffold;
+        this.misclickPending = scaffold ? false : StochasticEngine.INSTANCE.rollMisclick();
+        InventoryManager.INSTANCE.begin(scaffold ? Scaffolder.INSTANCE.item() : t.state().getBlock().asItem());
+        fetchStartMs = now;
+        if (!scaffold) {
+            Scaffolder.INSTANCE.reset();
+            scaffoldGoal = null;
+        }
+        state = State.FETCHING_ITEM;
+    }
+
+    /** Build a staircase step toward an unreachable (too-high) target. */
+    private boolean tryScaffold(MinecraftClient client, ClientPlayerEntity player, Target realTarget) {
+        BuilderConfig cfg = BuilderConfig.INSTANCE;
+        if (!cfg.enableScaffolding) return false;
+
+        // New goal → fresh staircase.
+        if (scaffoldGoal == null || !scaffoldGoal.equals(realTarget.pos())) {
+            scaffoldGoal = realTarget.pos();
+            scaffoldAttempts = 0;
+            Scaffolder.INSTANCE.reset();
+        }
+        if (scaffoldAttempts > cfg.maxScaffoldBlocks * 2) {
+            Scaffolder.INSTANCE.reset();
+            scaffoldGoal = null;
+            return false; // give up; caller blacklists the target
+        }
+
+        Target scaf = Scaffolder.INSTANCE.next(client, player, realTarget.pos());
+        if (scaf == null) return false;
+
+        PlacementSolution ssol = BlockPlacementMath.solve(client.world, player, scaf.pos(), scaf.state(), HAND);
+        if (ssol == null) return false;
+
+        if (BlockPlacementMath.reachable(client.world, player, ssol)) {
+            scaffoldAttempts++;
+            beginBuild(scaf, ssol, System.currentTimeMillis(), true);
+            return true;
+        }
+        if (cfg.enableNavigation && startNavigation(client, player, scaf, ssol)) {
+            navTarget = scaf.pos();
+            recoveryAttempts = 0;
+            state = State.NAVIGATING;
+            return true;
+        }
+        return false;
     }
 
     private boolean startNavigation(MinecraftClient client, ClientPlayerEntity player,
@@ -424,7 +481,12 @@ public final class BuilderStateMachine {
             var now = client.world.getBlockState(target.pos());
             placed = !now.isAir() && now.getBlock() == target.state().getBlock();
         }
-        if (target != null) {
+        if (buildingScaffold) {
+            // Scaffold block: track separately; a failure aborts the staircase so
+            // we don't loop, and it isn't counted as schematic progress.
+            if (placed) Scaffolder.INSTANCE.notePlaced();
+            else { Scaffolder.INSTANCE.reset(); scaffoldGoal = null; }
+        } else if (target != null) {
             long key = target.pos().asLong();
             if (placed) {
                 placedCount++;
@@ -480,6 +542,9 @@ public final class BuilderStateMachine {
         placeFails.clear();
         targetCache.clear();
         lastScanMs = 0L;
+        Scaffolder.INSTANCE.reset();
+        scaffoldGoal = null;
+        scaffoldAttempts = 0;
         diagSolveNull = diagFetchFail = diagVerifyFail = diagPlaceTry = diagPlaceFail = 0;
         StochasticEngine.INSTANCE.onActivate();
         state = State.SCANNING;
@@ -506,6 +571,9 @@ public final class BuilderStateMachine {
         placeFails.clear();
         targetCache.clear();
         lastScanMs = 0L;
+        Scaffolder.INSTANCE.reset();
+        scaffoldGoal = null;
+        scaffoldAttempts = 0;
         clearTarget();
         state = State.IDLE;
     }
@@ -526,6 +594,7 @@ public final class BuilderStateMachine {
         target = null;
         solution = null;
         misclickPending = false;
+        buildingScaffold = false;
     }
 
     // ---------------------------------------------------------------------

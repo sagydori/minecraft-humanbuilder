@@ -76,6 +76,10 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setMin(500).setMax(20000).setSaveConsumer(v -> cfg.maxPathIterations = v).build());
         nav.addEntry(eb.startDoubleField(Text.literal("Turn speed (deg/tick)"), cfg.turnSpeedDegPerTick)
                 .setMin(2.0).setMax(90.0).setSaveConsumer(v -> cfg.turnSpeedDegPerTick = v).build());
+        nav.addEntry(eb.startBooleanToggle(Text.literal("Build staircase to reach high layers"), cfg.enableScaffolding)
+                .setSaveConsumer(v -> cfg.enableScaffolding = v).build());
+        nav.addEntry(eb.startIntField(Text.literal("Max scaffold blocks"), cfg.maxScaffoldBlocks)
+                .setMin(0).setMax(512).setSaveConsumer(v -> cfg.maxScaffoldBlocks = v).build());
 
         return builder.build();
     }
