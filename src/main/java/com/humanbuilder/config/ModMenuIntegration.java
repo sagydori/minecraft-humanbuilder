@@ -30,8 +30,8 @@ public class ModMenuIntegration implements ModMenuApi {
         ConfigCategory general = builder.getOrCreateCategory(Text.literal("General"));
         general.addEntry(eb.startBooleanToggle(Text.literal("Enabled"), cfg.enabled)
                 .setSaveConsumer(v -> cfg.enabled = v).build());
-        general.addEntry(eb.startDoubleField(Text.literal("Scan radius (blocks)"), cfg.scanRadius)
-                .setMin(1.0).setMax(6.0).setSaveConsumer(v -> cfg.scanRadius = v).build());
+        general.addEntry(eb.startDoubleField(Text.literal("Fallback scan radius (no bounds)"), cfg.scanRadius)
+                .setMin(8.0).setMax(512.0).setSaveConsumer(v -> cfg.scanRadius = v).build());
         general.addEntry(eb.startBooleanToggle(Text.literal("Block user input while active"), cfg.blockUserInput)
                 .setSaveConsumer(v -> cfg.blockUserInput = v).build());
         general.addEntry(eb.startBooleanToggle(Text.literal("Report build-rate estimate"), cfg.reportEstimate)

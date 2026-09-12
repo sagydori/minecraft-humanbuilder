@@ -1,6 +1,8 @@
 package com.humanbuilder.scanner;
 
 import com.humanbuilder.config.BuilderConfig;
+import fi.dy.masa.litematica.data.DataManager;
+import fi.dy.masa.litematica.schematic.placement.SchematicPlacement;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import fi.dy.masa.litematica.world.WorldSchematic;
 import net.minecraft.block.BlockState;
@@ -14,7 +16,9 @@ import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.state.property.Properties;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
@@ -22,10 +26,10 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Module F — The Litematica Bridge. Scans a spherical radius from the eye and
- * returns placeable targets (lowest-Y first, then nearest). Also records a
- * breakdown of why blocks were skipped, surfaced in the status line for
- * diagnosis.
+ * Module F — The Litematica Bridge. Scans the WHOLE selected schematic (not just
+ * a small radius) bottom-up, so the builder can find the next placeable block
+ * anywhere and walk to it. The scan is capped and collected lowest-Y first, so it
+ * naturally focuses on the lowest unfinished layer and stays cheap.
  */
 public final class SchematicBridge {
 
@@ -33,17 +37,15 @@ public final class SchematicBridge {
 
     private SchematicBridge() {}
 
-    /** Diagnostic counts from the most recent scan. */
     public static final class ScanStats {
         public boolean schemNull;
-        public int seen, alreadyOk, occupied, noItem, noAnchor, outOfBounds, selfBody, doubleHalf, candidates;
+        public int seen, alreadyOk, occupied, noItem, noAnchor, selfBody, doubleHalf, candidates;
 
         public String summary() {
             if (schemNull) return "schem=NULL (no Litematica schematic world)";
-            if (seen == 0) return "no schematic blocks in range";
+            if (seen == 0) return "no schematic blocks found";
             return "seen " + seen + " | ok " + alreadyOk + " | occ " + occupied
-                    + " | noItem " + noItem + " | noAnchor " + noAnchor
-                    + " | oob " + outOfBounds + " | cand " + candidates;
+                    + " | noItem " + noItem + " | noAnchor " + noAnchor + " | cand " + candidates;
         }
     }
 
@@ -64,47 +66,36 @@ public final class SchematicBridge {
             return List.of();
         }
 
+        BuilderConfig cfg = BuilderConfig.INSTANCE;
         boolean creative = player.getAbilities().creativeMode;
         Vec3d eye = player.getEyePos();
-        double radius = BuilderConfig.INSTANCE.scanRadius;
-        double radiusSq = radius * radius;
-        int ri = (int) Math.ceil(radius);
+        BlockPos feet = player.getBlockPos();
 
-        int cx = (int) Math.floor(eye.x);
-        int cy = (int) Math.floor(eye.y);
-        int cz = (int) Math.floor(eye.z);
+        int[] region = region(player);
+        int x0 = region[0], y0 = region[1], z0 = region[2];
+        int x1 = region[3], y1 = region[4], z1 = region[5];
 
         var chunkManager = schem.getChunkManager();
-        BlockPos feet = player.getBlockPos();
         List<Target> out = new ArrayList<>();
         BlockPos.Mutable pos = new BlockPos.Mutable();
+        long iterations = 0;
 
-        for (int dx = -ri; dx <= ri; dx++) {
-            for (int dy = -ri; dy <= ri; dy++) {
-                for (int dz = -ri; dz <= ri; dz++) {
-                    pos.set(cx + dx, cy + dy, cz + dz);
-
-                    double ex = pos.getX() + 0.5 - eye.x;
-                    double ey = pos.getY() + 0.5 - eye.y;
-                    double ez = pos.getZ() + 0.5 - eye.z;
-                    if (ex * ex + ey * ey + ez * ez > radiusSq) continue;
-                    if (!chunkManager.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) continue;
+        // Bottom-up: iterate Y ascending and stop once we have enough candidates,
+        // which keeps us on the lowest unfinished layers.
+        outer:
+        for (int y = y0; y <= y1; y++) {
+            for (int x = x0; x <= x1; x++) {
+                for (int z = z0; z <= z1; z++) {
+                    if (++iterations > cfg.maxScanIterations) break outer;
+                    pos.set(x, y, z);
+                    if (!chunkManager.isChunkLoaded(x >> 4, z >> 4)) continue;
 
                     BlockState want = schem.getBlockState(pos);
                     if (want.isAir()) continue;
                     st.seen++;
 
-                    if (BuilderConfig.INSTANCE.buildBounds != null
-                            && !BuilderConfig.INSTANCE.buildBounds.contains(
-                                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5)) {
-                        st.outOfBounds++;
-                        continue;
-                    }
-
-                    // Never place into the player's own body (feet/head cells).
                     if (pos.equals(feet) || pos.equals(feet.up())) { st.selfBody++; continue; }
 
-                    // Skip auto-generated second halves of double blocks.
                     if ((want.contains(Properties.DOUBLE_BLOCK_HALF)
                             && want.get(Properties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER)
                             || (want.contains(Properties.BED_PART)
@@ -119,21 +110,55 @@ public final class SchematicBridge {
 
                     Item item = want.getBlock().asItem();
                     if (item == Items.AIR) { st.noItem++; continue; }
-                    // Survival needs the item in inventory; creative can grab it.
                     if (!creative && !hasItem(player.getInventory(), item)) { st.noItem++; continue; }
                     if (!hasAnchor(real, pos)) { st.noAnchor++; continue; }
 
                     st.candidates++;
                     out.add(new Target(pos.toImmutable(), want));
+                    if (out.size() >= cfg.maxCandidates) break outer;
                 }
             }
         }
 
         out.sort(Comparator
                 .comparingInt((Target t) -> t.pos().getY())
-                .thenComparingDouble(t -> horizontalDistSq(t.pos(), eye)));
+                .thenComparingDouble(t -> t.pos().getSquaredDistance(eye.x, eye.y, eye.z)));
         lastStats = st;
         return out;
+    }
+
+    /** Region [x0,y0,z0,x1,y1,z1] to scan: chosen bounds, else selected placement, else a radius box. */
+    private static int[] region(ClientPlayerEntity player) {
+        Box b = BuilderConfig.INSTANCE.buildBounds;
+        if (b != null) {
+            return new int[]{
+                    MathHelper.floor(b.minX), MathHelper.floor(b.minY), MathHelper.floor(b.minZ),
+                    MathHelper.ceil(b.maxX) - 1, MathHelper.ceil(b.maxY) - 1, MathHelper.ceil(b.maxZ) - 1};
+        }
+        int[] pb = placementBox();
+        if (pb != null) return pb;
+        int r = (int) Math.ceil(BuilderConfig.INSTANCE.scanRadius);
+        BlockPos f = player.getBlockPos();
+        return new int[]{f.getX() - r, f.getY() - r, f.getZ() - r,
+                f.getX() + r, f.getY() + r, f.getZ() + r};
+    }
+
+    private static int[] placementBox() {
+        try {
+            var mgr = DataManager.getSchematicPlacementManager();
+            if (mgr == null) return null;
+            SchematicPlacement p = mgr.getSelectedSchematicPlacement();
+            if (p == null) return null;
+            fi.dy.masa.litematica.selection.Box box = p.getEclosingBox();
+            if (box == null) return null;
+            BlockPos c1 = box.getPos1(), c2 = box.getPos2();
+            if (c1 == null || c2 == null) return null;
+            return new int[]{
+                    Math.min(c1.getX(), c2.getX()), Math.min(c1.getY(), c2.getY()), Math.min(c1.getZ(), c2.getZ()),
+                    Math.max(c1.getX(), c2.getX()), Math.max(c1.getY(), c2.getY()), Math.max(c1.getZ(), c2.getZ())};
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     private static boolean hasItem(PlayerInventory inv, Item item) {
@@ -154,11 +179,5 @@ public final class SchematicBridge {
             }
         }
         return false;
-    }
-
-    private static double horizontalDistSq(BlockPos pos, Vec3d eye) {
-        double dx = pos.getX() + 0.5 - eye.x;
-        double dz = pos.getZ() + 0.5 - eye.z;
-        return dx * dx + dz * dz;
     }
 }

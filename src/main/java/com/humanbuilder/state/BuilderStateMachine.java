@@ -58,6 +58,10 @@ public final class BuilderStateMachine {
     private int recoveryTicks;
     private int recoveryAttempts;
 
+    // Full-schematic target cache.
+    private final java.util.List<Target> targetCache = new java.util.ArrayList<>();
+    private long lastScanMs = 0L;
+
     /** Temporary skip-lists keyed by BlockPos.asLong() → expiry epoch-ms / fail count. */
     private final Map<Long, Long> blacklistUntil = new HashMap<>();
     private final Map<Long, Integer> placeFails = new HashMap<>();
@@ -159,45 +163,57 @@ public final class BuilderStateMachine {
 
     private void tickScanning(MinecraftClient client, ClientPlayerEntity player) {
         BuilderConfig cfg = BuilderConfig.INSTANCE;
-        List<Target> targets = SchematicBridge.INSTANCE.scan(client);
+        long now = System.currentTimeMillis();
 
-        for (Target t : targets) {
-            if (blacklisted(t.pos())) continue;
-
-            PlacementSolution sol = BlockPlacementMath.solve(
-                    client.world, player, t.pos(), t.state(), HAND);
-            if (sol == null) {
-                diagSolveNull++;
-                blacklist(t.pos(), 4_000);
-                continue;
-            }
-
-            // Build only if we can reach it (range + clear LOS + not into our own
-            // body) AND looking at it from here yields the correct facing.
-            boolean canBuildHere = BlockPlacementMath.reachable(client.world, player, sol)
-                    && BlockPlacementMath.facingOkFrom(player, HAND, t.state(), sol, player.getEyePos());
-            if (canBuildHere) {
-                this.target = t;
-                this.solution = sol;
-                this.misclickPending = StochasticEngine.INSTANCE.rollMisclick();
-                InventoryManager.INSTANCE.begin(t.state().getBlock().asItem());
-                fetchStartMs = System.currentTimeMillis();
-                state = State.FETCHING_ITEM;
-                return;
-            }
-
-            // Otherwise walk to a spot that can see it from the correct side.
-            if (cfg.enableNavigation && startNavigation(client, player, t, sol)) {
-                navTarget = t.pos();
-                recoveryAttempts = 0;
-                state = State.NAVIGATING;
-                return;
-            }
-
-            // Can't reach/orient and can't path to it — skip for a while.
-            blacklist(t.pos(), 15_000);
+        // Full-schematic scan, cached: refresh when the cache is empty (current
+        // layer finished) or gets stale (new blocks became placeable).
+        if (targetCache.isEmpty() || now - lastScanMs > 3000L) {
+            targetCache.clear();
+            targetCache.addAll(SchematicBridge.INSTANCE.scan(client));
+            lastScanMs = now;
         }
-        // Nothing actionable this tick; remain SCANNING.
+
+        // Best non-blacklisted target (list is lowest-Y first, then nearest).
+        Target chosen = null;
+        for (Target t : targetCache) {
+            if (!blacklisted(t.pos())) { chosen = t; break; }
+        }
+        if (chosen == null) return; // nothing to do right now (done, or all far/blacklisted)
+
+        PlacementSolution sol = BlockPlacementMath.solve(
+                client.world, player, chosen.pos(), chosen.state(), HAND);
+        if (sol == null) {
+            diagSolveNull++;
+            blacklist(chosen.pos(), 4_000);
+            targetCache.remove(chosen);
+            return;
+        }
+
+        boolean canBuildHere = BlockPlacementMath.reachable(client.world, player, sol)
+                && BlockPlacementMath.facingOkFrom(player, HAND, chosen.state(), sol, player.getEyePos());
+        if (canBuildHere) {
+            this.target = chosen;
+            this.solution = sol;
+            this.misclickPending = StochasticEngine.INSTANCE.rollMisclick();
+            InventoryManager.INSTANCE.begin(chosen.state().getBlock().asItem());
+            fetchStartMs = now;
+            targetCache.remove(chosen);
+            state = State.FETCHING_ITEM;
+            return;
+        }
+
+        // Not buildable from here — walk to it (even if far; partial paths make
+        // progress, and we re-plan on arrival).
+        if (cfg.enableNavigation && startNavigation(client, player, chosen, sol)) {
+            navTarget = chosen.pos();
+            recoveryAttempts = 0;
+            state = State.NAVIGATING;
+            return;
+        }
+
+        // Can't reach/orient and can't path to it — skip it for a while.
+        blacklist(chosen.pos(), 15_000);
+        targetCache.remove(chosen);
     }
 
     private boolean startNavigation(MinecraftClient client, ClientPlayerEntity player,
@@ -248,11 +264,17 @@ public final class BuilderStateMachine {
         BlockState want = schem.getBlockState(nt);
         if (want.isAir()) return;
         PlacementSolution sol = BlockPlacementMath.solve(client.world, player, nt, want, HAND);
-        boolean canBuild = sol != null
-                && BlockPlacementMath.reachable(client.world, player, sol)
+        if (sol == null) { blacklist(nt, 12_000); return; }
+
+        boolean canBuild = BlockPlacementMath.reachable(client.world, player, sol)
                 && BlockPlacementMath.facingOkFrom(player, HAND, want, sol, player.getEyePos());
-        if (!canBuild) {
-            blacklist(nt, 12_000); // arrived but still can't build it correctly
+        if (canBuild) return; // SCANNING will build it next tick
+
+        // Only give up if we're actually near it; if it's still far, we only made
+        // partial progress (long path) — keep approaching without blacklisting.
+        double dist = player.getEyePos().distanceTo(sol.targetCenter());
+        if (dist <= BuilderConfig.INSTANCE.navReach + 2.5) {
+            blacklist(nt, 12_000);
         }
     }
 
@@ -456,6 +478,8 @@ public final class BuilderStateMachine {
         lastReportMs = 0L;
         blacklistUntil.clear();
         placeFails.clear();
+        targetCache.clear();
+        lastScanMs = 0L;
         diagSolveNull = diagFetchFail = diagVerifyFail = diagPlaceTry = diagPlaceFail = 0;
         StochasticEngine.INSTANCE.onActivate();
         state = State.SCANNING;
@@ -480,6 +504,8 @@ public final class BuilderStateMachine {
         navTarget = null;
         blacklistUntil.clear();
         placeFails.clear();
+        targetCache.clear();
+        lastScanMs = 0L;
         clearTarget();
         state = State.IDLE;
     }

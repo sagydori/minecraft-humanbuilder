@@ -17,8 +17,12 @@ public final class BuilderConfig {
     // --- General ---
     /** Master enable. Toggled by the keybind. */
     public boolean enabled = false;
-    /** Spherical scan radius from the eye position, in blocks (blueprint: 4.0). */
-    public double scanRadius = 4.0;
+    /** Fallback scan radius around the player when no placement bounds are set. */
+    public double scanRadius = 64.0;
+    /** Max candidate targets collected per full scan (bottom-up). */
+    public int maxCandidates = 128;
+    /** Safety cap on blocks examined per full scan. */
+    public int maxScanIterations = 400_000;
     /** Swallow real mouse input while the bot is active. */
     public boolean blockUserInput = true;
 
