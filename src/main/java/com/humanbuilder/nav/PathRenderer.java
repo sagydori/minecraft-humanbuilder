@@ -50,7 +50,7 @@ public final class PathRenderer {
                         a.x + (b.x - a.x) * t,
                         a.y + (b.y - a.y) * t,
                         a.z + (b.z - a.z) * t,
-                        0, 0, 0);
+                        0.0, 0.0, 0.0);
             }
         }
     }

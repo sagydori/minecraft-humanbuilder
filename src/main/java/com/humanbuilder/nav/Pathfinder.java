@@ -241,9 +241,12 @@ public final class Pathfinder {
     }
 
     private static boolean lineOfSight(World world, Vec3d eye, Vec3d target, BlockPos targetPos) {
+        // Pass the player as the ray entity: it disambiguates the Entity vs
+        // ShapeContext constructor overloads and avoids a null shape context.
+        net.minecraft.entity.Entity cam = net.minecraft.client.MinecraftClient.getInstance().player;
         BlockHitResult hit = world.raycast(new RaycastContext(
                 eye, target, RaycastContext.ShapeType.COLLIDER,
-                RaycastContext.FluidHandling.NONE, null));
+                RaycastContext.FluidHandling.NONE, cam));
         return hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(targetPos);
     }
 }
