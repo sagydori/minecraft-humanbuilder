@@ -60,6 +60,10 @@ public final class BuilderStateMachine {
     private final Map<Long, Integer> placeFails = new HashMap<>();
 
     private long waitUntilMs = 0L;
+    private long fetchStartMs = 0L;
+
+    // Per-stage diagnostic counters (surfaced in the status line while placed==0).
+    private int diagSolveNull, diagFetchFail, diagVerifyFail, diagPlaceTry, diagPlaceFail;
 
     // --- Build-time estimation ---
     private long sessionStartMs = 0L;
@@ -169,10 +173,12 @@ public final class BuilderStateMachine {
                 this.solution = sol;
                 this.misclickPending = StochasticEngine.INSTANCE.rollMisclick();
                 InventoryManager.INSTANCE.begin(t.state().getBlock().asItem());
+                fetchStartMs = System.currentTimeMillis();
                 state = State.FETCHING_ITEM;
                 return;
             }
             // No placement geometry from here — skip briefly so we don't spin on it.
+            diagSolveNull++;
             blacklist(t.pos(), 4_000);
         }
         // Nothing actionable this tick; remain SCANNING.
@@ -243,11 +249,19 @@ public final class BuilderStateMachine {
     // ---------------------------------------------------------------------
 
     private void tickFetching(MinecraftClient client) {
+        if (System.currentTimeMillis() - fetchStartMs > 3000L) {
+            // Couldn't get the item in hand in time — skip so we don't hang here.
+            diagFetchFail++;
+            if (target != null) blacklist(target.pos(), 8_000);
+            abortTarget();
+            return;
+        }
         try {
             if (InventoryManager.INSTANCE.tick(client) == InventoryManager.Status.DONE) {
                 state = State.PATHING_TO_ANCHOR;
             }
         } catch (MissingItemException e) {
+            diagFetchFail++;
             abortTarget();
         }
     }
@@ -290,6 +304,7 @@ public final class BuilderStateMachine {
         if (ok) {
             beginClicking(client);
         } else {
+            diagVerifyFail++;
             abortTarget();
         }
     }
@@ -321,6 +336,7 @@ public final class BuilderStateMachine {
     private void performPlacement(MinecraftClient client) {
         ClientPlayerEntity player = client.player;
         if (player == null || solution == null || client.interactionManager == null) return;
+        diagPlaceTry++;
         BlockHitResult hit = new BlockHitResult(
                 solution.hitVec(), solution.side(), solution.anchorPos(), false);
         client.interactionManager.interactBlock(player, HAND, hit);
@@ -341,6 +357,7 @@ public final class BuilderStateMachine {
                 placedCount++;
                 placeFails.remove(key);
             } else {
+                diagPlaceFail++;
                 // Repeated placement failure → blacklist so we don't loop forever.
                 int fails = placeFails.merge(key, 1, Integer::sum);
                 if (fails >= 4) {
@@ -388,6 +405,7 @@ public final class BuilderStateMachine {
         lastReportMs = 0L;
         blacklistUntil.clear();
         placeFails.clear();
+        diagSolveNull = diagFetchFail = diagVerifyFail = diagPlaceTry = diagPlaceFail = 0;
         StochasticEngine.INSTANCE.onActivate();
         state = State.SCANNING;
     }
@@ -446,9 +464,12 @@ public final class BuilderStateMachine {
         String scope = BuilderConfig.INSTANCE.buildBounds != null
                 ? "§a" + BuilderConfig.INSTANCE.selectedSchematic
                 : "§eall";
-        // When nothing has been placed yet, show why (scan breakdown) for diagnosis.
+        // When nothing has been placed yet, show why (scan breakdown + per-stage
+        // failure counters) for diagnosis.
         String extra = placedCount == 0
                 ? " §7| §f" + SchematicBridge.INSTANCE.getLastStats().summary()
+                  + String.format(" §7| §fsolveN §c%d §ffetchF §c%d §fvFail §c%d §fplace §a%d§7/§c%d",
+                        diagSolveNull, diagFetchFail, diagVerifyFail, diagPlaceTry, diagPlaceFail)
                 : "";
         String msg = String.format(
                 "§b[HB] §f%s §7| placed §f%d §7| TPS §f%.1f §7| %s%s",
