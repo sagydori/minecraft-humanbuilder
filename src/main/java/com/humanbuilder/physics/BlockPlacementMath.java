@@ -153,6 +153,31 @@ public final class BlockPlacementMath {
                 && bhr.getSide() == sol.side();
     }
 
+    /**
+     * Can the player actually place here from where they stand right now?
+     * True only if the hit point is within block-interaction range AND nothing
+     * obstructs the eye→hit line before the target. This is robust to the
+     * floor-grazing false-negative: an obstruction only disqualifies the target
+     * if it is hit <em>before</em> reaching the intended point (grazing a
+     * coplanar neighbour at the very end is fine).
+     */
+    public static boolean reachable(World world, ClientPlayerEntity player, PlacementSolution sol) {
+        Vec3d eye = player.getEyePos();
+        Vec3d aim = sol.hitVec();
+        double reach = player.getBlockInteractionRange();
+        double dAim = eye.squaredDistanceTo(aim);
+        if (dAim > (reach - 0.05) * (reach - 0.05)) return false;
+
+        BlockHitResult r = world.raycast(new RaycastContext(
+                eye, aim, RaycastContext.ShapeType.COLLIDER,
+                RaycastContext.FluidHandling.NONE, player));
+        if (r.getType() == HitResult.Type.MISS) return true;
+        if (r.getBlockPos().equals(sol.anchorPos())) return true;
+        // An obstruction only counts if it is closer than the target itself.
+        double dHit = r.getPos().squaredDistanceTo(eye);
+        return dHit >= dAim - 0.06;
+    }
+
     // ---------------------------------------------------------------------
     //  Helpers
     // ---------------------------------------------------------------------

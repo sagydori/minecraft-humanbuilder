@@ -13,6 +13,8 @@ import com.humanbuilder.scanner.SchematicBridge;
 import com.humanbuilder.scanner.Target;
 import com.humanbuilder.stochastic.StochasticEngine;
 import com.humanbuilder.util.InputSimulator;
+import fi.dy.masa.litematica.world.SchematicWorldHandler;
+import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.text.Text;
@@ -146,29 +148,21 @@ public final class BuilderStateMachine {
     private void tickScanning(MinecraftClient client, ClientPlayerEntity player) {
         BuilderConfig cfg = BuilderConfig.INSTANCE;
         List<Target> targets = SchematicBridge.INSTANCE.scan(client);
-        double reachSq = cfg.navReach * cfg.navReach;
-        Vec3d eye = player.getEyePos();
 
         for (Target t : targets) {
             if (blacklisted(t.pos())) continue;
 
-            double d2 = eye.squaredDistanceTo(Vec3d.ofCenter(t.pos()));
-            if (cfg.enableNavigation && d2 > reachSq) {
-                if (startNavigation(client, player, t.pos())) {
-                    navTarget = t.pos();
-                    recoveryAttempts = 0;
-                    state = State.NAVIGATING;
-                } else {
-                    blacklist(t.pos(), 20_000); // can't reach it right now
-                    continue;
-                }
-                return;
-            }
-
-            // In reach — try to build it.
             PlacementSolution sol = BlockPlacementMath.solve(
                     client.world, player, t.pos(), t.state(), HAND);
-            if (sol != null) {
+            if (sol == null) {
+                diagSolveNull++;
+                blacklist(t.pos(), 4_000);
+                continue;
+            }
+
+            // Only build if we can actually reach it (in range + clear line of
+            // sight). Otherwise walk to a spot that can — never place through walls.
+            if (BlockPlacementMath.reachable(client.world, player, sol)) {
                 this.target = t;
                 this.solution = sol;
                 this.misclickPending = StochasticEngine.INSTANCE.rollMisclick();
@@ -177,9 +171,16 @@ public final class BuilderStateMachine {
                 state = State.FETCHING_ITEM;
                 return;
             }
-            // No placement geometry from here — skip briefly so we don't spin on it.
-            diagSolveNull++;
-            blacklist(t.pos(), 4_000);
+
+            if (cfg.enableNavigation && startNavigation(client, player, t.pos())) {
+                navTarget = t.pos();
+                recoveryAttempts = 0;
+                state = State.NAVIGATING;
+                return;
+            }
+
+            // Can't reach and can't path to it — skip for a while.
+            blacklist(t.pos(), 15_000);
         }
         // Nothing actionable this tick; remain SCANNING.
     }
@@ -214,15 +215,22 @@ public final class BuilderStateMachine {
 
     private void tickArrived(MinecraftClient client, ClientPlayerEntity player) {
         NavigationController.INSTANCE.stop(client);
-        if (navTarget != null) {
-            double reachSq = BuilderConfig.INSTANCE.navReach * BuilderConfig.INSTANCE.navReach;
-            if (player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(navTarget)) > reachSq) {
-                blacklist(navTarget, 15_000); // arrived but still not close enough
-            }
-        }
+        BlockPos nt = navTarget;
         navTarget = null;
         recoveryAttempts = 0;
         state = State.SCANNING;
+
+        // If, after arriving, we still can't reach/build it, blacklist so we
+        // don't walk back and forth to the same unreachable target forever.
+        if (nt == null) return;
+        var schem = SchematicWorldHandler.getSchematicWorld();
+        if (schem == null) return;
+        BlockState want = schem.getBlockState(nt);
+        if (want.isAir()) return;
+        PlacementSolution sol = BlockPlacementMath.solve(client.world, player, nt, want, HAND);
+        if (sol == null || !BlockPlacementMath.reachable(client.world, player, sol)) {
+            blacklist(nt, 12_000);
+        }
     }
 
     private void tickStuckRecovery(MinecraftClient client, ClientPlayerEntity player) {
