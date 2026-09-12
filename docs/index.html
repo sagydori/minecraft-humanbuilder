@@ -130,13 +130,13 @@
       actually takes</b>.</p>
 
     <div class="cta">
-      <a class="btn btn-primary" href="https://github.com/sagydori/minecraft-humanbuilder/releases/latest/download/humanbuilder-1.0.0.jar">
+      <a id="dlBtn" class="btn btn-primary" href="https://github.com/sagydori/minecraft-humanbuilder/releases/latest">
         ⬇ Download .jar
       </a>
       <a class="btn btn-ghost" href="https://github.com/sagydori/minecraft-humanbuilder/releases/latest">All releases</a>
       <a class="btn btn-ghost" href="https://github.com/sagydori/minecraft-humanbuilder">Source code</a>
     </div>
-    <div class="dl-note">Latest build · always points to the newest jar · pair with the mods below</div>
+    <div class="dl-note">Latest build: <code id="dlName">resolving…</code> · always the newest jar · pair with the mods below</div>
   </header>
 
   <section id="features">
@@ -174,7 +174,7 @@
     <h2><span class="n">#</span> Setup</h2>
     <div class="panel">
       <ol class="steps">
-        <li>Download <b>humanbuilder-1.0.0.jar</b> with the green button above.</li>
+        <li>Download the <b>humanbuilder</b> jar with the green button above.</li>
         <li>Drop it into your <code class="k">.minecraft/mods</code> folder, together with Fabric API, Litematica and malilib.</li>
         <li>Launch Minecraft <b>1.21.11</b> with the Fabric loader profile.</li>
         <li>Load a schematic in Litematica and <b>place</b> it where you want to build.</li>
@@ -203,5 +203,29 @@
   </footer>
 
 </div>
+
+<script>
+  // Resolve the newest release jar so the button + filename always reflect the
+  // latest build (the asset name changes every publish).
+  (function () {
+    var api = "https://api.github.com/repos/sagydori/minecraft-humanbuilder/releases/latest";
+    var btn = document.getElementById("dlBtn");
+    var nameEl = document.getElementById("dlName");
+    fetch(api, { headers: { "Accept": "application/vnd.github+json" } })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (d) {
+        var jar = (d.assets || []).filter(function (a) {
+          return /\.jar$/.test(a.name) && !/-sources/.test(a.name);
+        })[0];
+        if (jar) {
+          btn.href = jar.browser_download_url;
+          nameEl.textContent = jar.name;
+        } else {
+          nameEl.textContent = d.tag_name || "see releases";
+        }
+      })
+      .catch(function () { nameEl.textContent = "see Releases →"; });
+  })();
+</script>
 </body>
 </html>

@@ -61,7 +61,13 @@ jobs:
           gradle-version: '9.7.1'
 
       - name: Build
-        run: gradle build --stacktrace --no-daemon
+        run: |
+          set -euo pipefail
+          SHORT=$(git rev-parse --short HEAD)
+          VER="1.0.0-b${{ github.run_number }}.g${SHORT}"
+          echo "MOD_VERSION=$VER" >> "$GITHUB_ENV"
+          echo "Building version $VER"
+          gradle build --stacktrace --no-daemon -Pmod_version="$VER"
 
       - name: Upload jar (per-run artifact)
         if: always()
@@ -81,6 +87,6 @@ jobs:
           echo "Releasing: $MAIN_JAR"
           gh release delete latest -y --cleanup-tag || true
           gh release create latest "$MAIN_JAR" \
-            --title "Latest build" \
-            --notes "Automated build from ${{ github.sha }}. Install alongside Fabric API, Litematica, and malilib for Minecraft 1.21.11." \
+            --title "Build ${{ github.run_number }} — ${MOD_VERSION}" \
+            --notes "Automated build ${MOD_VERSION} from ${{ github.sha }}. Install alongside Fabric API, Litematica, and malilib for Minecraft 1.21.11." \
             --latest
