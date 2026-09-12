@@ -297,9 +297,16 @@ public final class BuilderStateMachine {
     private void beginAimAtSolution(MinecraftClient client) {
         ClientPlayerEntity player = client.player;
         if (player == null || solution == null) return;
-        Vec3d eye = player.getEyePos();
-        float[] yp = HumanAimController.lookAt(eye, solution.hitVec());
-        HumanAimController.INSTANCE.beginAim(player, yp[0], yp[1]);
+        if (solution.requiredYaw() != null) {
+            // Directional block: face the direction that yields the correct facing.
+            float yaw = solution.requiredYaw();
+            float pitch = solution.requiredPitch() != null ? solution.requiredPitch() : player.getPitch();
+            HumanAimController.INSTANCE.beginAim(player, yaw, pitch);
+        } else {
+            Vec3d eye = player.getEyePos();
+            float[] yp = HumanAimController.lookAt(eye, solution.hitVec());
+            HumanAimController.INSTANCE.beginAim(player, yp[0], yp[1]);
+        }
     }
 
     private void tickAiming(MinecraftClient client) {

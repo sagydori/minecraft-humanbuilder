@@ -12,6 +12,7 @@ import net.minecraft.block.enums.BlockHalf;
 import net.minecraft.block.enums.SlabType;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.ItemPlacementContext;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.ItemUsageContext;
 import net.minecraft.state.property.Properties;
 import net.minecraft.state.property.Property;
@@ -54,7 +55,13 @@ public final class BlockPlacementMath {
     private BlockPlacementMath() {}
 
     public record PlacementSolution(BlockPos anchorPos, Direction side, Vec3d hitVec,
-                                    boolean requiresSneak, Float requiredYaw) {}
+                                    boolean requiresSneak, Float requiredYaw, Float requiredPitch) {}
+
+    /** Candidate look directions searched to reproduce a directional block. */
+    private static final Direction[] LOOKS = {
+            Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST,
+            Direction.UP, Direction.DOWN
+    };
 
     /** Prefer building on the block below (bottom-up), then sides, then underside last. */
     private static final Direction[] APPROACH_ORDER = {
@@ -75,7 +82,8 @@ public final class BlockPlacementMath {
             Properties.STAIR_SHAPE,
             Properties.NORTH_WIRE_CONNECTION, Properties.EAST_WIRE_CONNECTION,
             Properties.SOUTH_WIRE_CONNECTION, Properties.WEST_WIRE_CONNECTION,
-            Properties.DISTANCE_1_7, Properties.PERSISTENT
+            Properties.DISTANCE_1_7, Properties.PERSISTENT,
+            Properties.ROTATION // 16-step sign/banner rotation — can't hit with 6 looks
     );
 
     // ---------------------------------------------------------------------
@@ -92,6 +100,10 @@ public final class BlockPlacementMath {
         BlockState existing = world.getBlockState(target);
         if (!existing.isAir() && !existing.isReplaceable()) return null;
 
+        boolean directional = needsOrientation(schematic);
+        Direction[] looks = directional ? LOOKS : new Direction[]{Direction.NORTH};
+        ItemStack stack = new ItemStack(schematic.getBlock().asItem());
+
         for (Direction approach : APPROACH_ORDER) {
             BlockPos anchor = target.offset(approach);
             Direction side = approach.getOpposite(); // face of the anchor pointing at the target
@@ -103,14 +115,17 @@ public final class BlockPlacementMath {
 
             for (Vec3d hit : hitCandidates(anchor, side, schematic)) {
                 BlockHitResult bhr = new BlockHitResult(hit, side, anchor, false);
-                ItemPlacementContext ctx = new ItemPlacementContext(new ItemUsageContext(player, hand, bhr));
-                if (!ctx.canPlace()) continue;
-
-                BlockState placed = schematic.getBlock().getPlacementState(ctx);
-                if (matches(placed, schematic, false)) {
-                    boolean sneak = isInteractable(anchorState);
-                    Float yaw = requiredYawForFacing(schematic);
-                    return new PlacementSolution(anchor, side, hit, sneak, yaw);
+                for (Direction look : looks) {
+                    ItemPlacementContext ctx = new OrientedPlacementContext(player, hand, stack, bhr, look);
+                    if (!ctx.canPlace()) continue;
+                    BlockState placed = schematic.getBlock().getPlacementState(ctx);
+                    // Strict: the exact facing/axis must match (rotation ignored).
+                    if (matches(placed, schematic, true)) {
+                        boolean sneak = isInteractable(anchorState);
+                        Float yaw = directional ? yawFor(look) : null;
+                        Float pitch = directional ? pitchFor(look) : null;
+                        return new PlacementSolution(anchor, side, hit, sneak, yaw, pitch);
+                    }
                 }
             }
         }
@@ -127,10 +142,9 @@ public final class BlockPlacementMath {
         ItemPlacementContext ctx = new ItemPlacementContext(new ItemUsageContext(player, hand, bhr));
         if (!ctx.canPlace()) return false;
         BlockState placed = schematic.getBlock().getPlacementState(ctx);
-        // Non-strict: the block type + structural props must match; facing is
-        // resolved by aiming and, for a build-time estimate, is not worth
-        // rejecting an otherwise-valid placement over.
-        return matches(placed, schematic, false);
+        // Strict: after the player has been aimed to the required orientation, the
+        // exact facing/axis must match (rotation is ignored, see IGNORED).
+        return matches(placed, schematic, true);
     }
 
     // ---------------------------------------------------------------------
@@ -245,23 +259,26 @@ public final class BlockPlacementMath {
         return true;
     }
 
-    /**
-     * Yaw the player should face to satisfy a horizontal FACING property, using
-     * the common "front toward the player" convention (chests, furnaces, etc.).
-     * Blocks that face the look direction instead (observers, pistons) are handled
-     * by the anchor's clicked side, so this hint is only a best-effort seed.
-     */
-    private static Float requiredYawForFacing(BlockState schematic) {
-        if (schematic.contains(Properties.HORIZONTAL_FACING)) {
-            Direction f = schematic.get(Properties.HORIZONTAL_FACING);
-            return horizontalYaw(f.getOpposite());
-        }
-        return null;
+    /** Does this block's state depend on how it's placed (facing/axis)? */
+    private static boolean needsOrientation(BlockState s) {
+        return s.contains(Properties.FACING)
+                || s.contains(Properties.HORIZONTAL_FACING)
+                || s.contains(Properties.AXIS)
+                || s.contains(Properties.HORIZONTAL_AXIS)
+                || s.contains(Properties.HOPPER_FACING);
     }
 
-    /** Minecraft yaw (deg) that points along a horizontal direction: S=0, W=90, N=180, E=-90. */
-    private static float horizontalYaw(Direction dir) {
-        return (float) Math.toDegrees(Math.atan2(-dir.getOffsetX(), dir.getOffsetZ()));
+    /** Player yaw that produces the given look direction (horizontal only; 0 for up/down). */
+    private static Float yawFor(Direction look) {
+        if (look.getAxis().isVertical()) return 0.0f;
+        return (float) Math.toDegrees(Math.atan2(-look.getOffsetX(), look.getOffsetZ()));
+    }
+
+    /** Player pitch that produces the given look direction. */
+    private static Float pitchFor(Direction look) {
+        if (look == Direction.UP) return -90.0f;
+        if (look == Direction.DOWN) return 90.0f;
+        return 0.0f;
     }
 
     /** Heuristic: would clicking this block trigger a use action, requiring sneak to place? */
