@@ -63,6 +63,12 @@ public final class BuilderConfig {
     /** Camera turn rate while navigating, degrees per tick. */
     public double turnSpeedDegPerTick = 22.0;
 
+    // --- Schematic selection (set by the in-game menu) ---
+    /** If non-null, only build blocks inside this world-space box (the chosen placement). */
+    public net.minecraft.util.math.Box buildBounds = null;
+    /** Name of the chosen schematic placement, for display. */
+    public String selectedSchematic = null;
+
     // --- Safety / debug ---
     /** If true, log the estimated remaining time to chat periodically. */
     public boolean reportEstimate = true;

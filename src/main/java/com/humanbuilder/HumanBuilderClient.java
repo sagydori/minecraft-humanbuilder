@@ -1,6 +1,7 @@
 package com.humanbuilder;
 
 import com.humanbuilder.config.BuilderConfig;
+import com.humanbuilder.gui.BuilderScreen;
 import com.humanbuilder.nav.PathRenderer;
 import com.humanbuilder.state.BuilderStateMachine;
 import net.fabricmc.api.ClientModInitializer;
@@ -22,6 +23,7 @@ public class HumanBuilderClient implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("HumanBuilder");
 
     private KeyBinding toggleKey;
+    private KeyBinding menuKey;
 
     @Override
     public void onInitializeClient() {
@@ -34,10 +36,21 @@ public class HumanBuilderClient implements ClientModInitializer {
                 GLFW.GLFW_KEY_B,
                 category
         ));
+        menuKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.humanbuilder.menu",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_N,
+                category
+        ));
 
         // The state machine itself runs from MinecraftClientMixin#tick (TAIL),
-        // as mandated. Here we only watch the toggle key and reset on disconnect.
+        // as mandated. Here we only watch the keys and reset on disconnect.
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            while (menuKey.wasPressed()) {
+                if (client.player != null && client.currentScreen == null) {
+                    client.setScreen(new BuilderScreen());
+                }
+            }
             while (toggleKey.wasPressed()) {
                 boolean now = !BuilderConfig.INSTANCE.enabled;
                 BuilderConfig.INSTANCE.enabled = now;
@@ -48,6 +61,8 @@ public class HumanBuilderClient implements ClientModInitializer {
 
         ClientPlayConnectionEvents.DISCONNECT.register((h, c) -> {
             BuilderConfig.INSTANCE.enabled = false;
+            BuilderConfig.INSTANCE.buildBounds = null;
+            BuilderConfig.INSTANCE.selectedSchematic = null;
             BuilderStateMachine.INSTANCE.reset();
         });
 

@@ -75,6 +75,13 @@ public final class SchematicBridge {
                     BlockState want = schem.getBlockState(pos);
                     if (want.isAir()) continue;
 
+                    // Restrict to the chosen placement's bounds, if the menu set one.
+                    if (BuilderConfig.INSTANCE.buildBounds != null
+                            && !BuilderConfig.INSTANCE.buildBounds.contains(
+                                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5)) {
+                        continue;
+                    }
+
                     // Don't place a block into the player's own body.
                     if (pos.equals(feet) || pos.equals(feet.up())) continue;
 
