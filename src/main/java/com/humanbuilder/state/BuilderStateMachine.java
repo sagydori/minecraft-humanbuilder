@@ -299,8 +299,11 @@ public final class BuilderStateMachine {
 
     private void tickVerifying(MinecraftClient client, ClientPlayerEntity player) {
         if (solution == null) { abortTarget(); return; }
-        boolean ok = BlockPlacementMath.confirm(client.world, player, target.state(), HAND, solution)
-                && BlockPlacementMath.lineOfSightClear(client.world, player, solution);
+        // Non-strict placement re-check only. The eye→hit raycast that used to
+        // gate this rejected valid floor-level placements (the ray grazes the
+        // surface), and it isn't needed since we place with the explicit hit
+        // result rather than the crosshair.
+        boolean ok = BlockPlacementMath.confirm(client.world, player, target.state(), HAND, solution);
         if (ok) {
             beginClicking(client);
         } else {

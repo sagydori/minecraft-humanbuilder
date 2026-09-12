@@ -126,7 +126,10 @@ public final class BlockPlacementMath {
         ItemPlacementContext ctx = new ItemPlacementContext(new ItemUsageContext(player, hand, bhr));
         if (!ctx.canPlace()) return false;
         BlockState placed = schematic.getBlock().getPlacementState(ctx);
-        return matches(placed, schematic, true);
+        // Non-strict: the block type + structural props must match; facing is
+        // resolved by aiming and, for a build-time estimate, is not worth
+        // rejecting an otherwise-valid placement over.
+        return matches(placed, schematic, false);
     }
 
     // ---------------------------------------------------------------------
