@@ -10,6 +10,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,11 +24,14 @@ public class HumanBuilderClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        // Since 1.21.9 the keybind category is a KeyBinding.Category keyed by an
+        // Identifier, not a translation-key string.
+        KeyBinding.Category category = KeyBinding.Category.create(Identifier.of(MOD_ID, "main"));
         toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.humanbuilder.toggle",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_B,
-                "category.humanbuilder"
+                category
         ));
 
         // The state machine itself runs from MinecraftClientMixin#tick (TAIL),

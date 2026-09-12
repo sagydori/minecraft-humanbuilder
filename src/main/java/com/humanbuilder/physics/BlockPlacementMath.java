@@ -217,9 +217,14 @@ public final class BlockPlacementMath {
     private static Float requiredYawForFacing(BlockState schematic) {
         if (schematic.contains(Properties.HORIZONTAL_FACING)) {
             Direction f = schematic.get(Properties.HORIZONTAL_FACING);
-            return f.getOpposite().asRotation();
+            return horizontalYaw(f.getOpposite());
         }
         return null;
+    }
+
+    /** Minecraft yaw (deg) that points along a horizontal direction: S=0, W=90, N=180, E=-90. */
+    private static float horizontalYaw(Direction dir) {
+        return (float) Math.toDegrees(Math.atan2(-dir.getOffsetX(), dir.getOffsetZ()));
     }
 
     /** Heuristic: would clicking this block trigger a use action, requiring sneak to place? */
