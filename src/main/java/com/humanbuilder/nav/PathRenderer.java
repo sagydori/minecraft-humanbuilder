@@ -46,8 +46,7 @@ public final class PathRenderer {
             int steps = Math.max(1, (int) (dist / 0.4));
             for (int s = 0; s <= steps; s++) {
                 double t = (double) s / steps;
-                // (effect, alwaysSpawn, canSpawnOnMinimal, x, y, z, vx, vy, vz)
-                client.world.addParticle(dust, true, false,
+                client.particleManager.addParticle(dust,
                         a.x + (b.x - a.x) * t,
                         a.y + (b.y - a.y) * t,
                         a.z + (b.z - a.z) * t,
