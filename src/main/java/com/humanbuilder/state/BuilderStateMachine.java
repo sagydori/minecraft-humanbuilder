@@ -447,4 +447,10 @@ public final class BuilderStateMachine {
                 placedCount, perMin, secPer, TPSMonitor.INSTANCE.getTps(), state);
         player.sendMessage(Text.literal(msg), true);
     }
+
+    private static void message(MinecraftClient client, String msg) {
+        if (client.player != null) {
+            client.player.sendMessage(Text.literal(msg), true);
+        }
+    }
 }

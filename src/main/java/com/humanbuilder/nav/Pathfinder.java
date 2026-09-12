@@ -242,7 +242,7 @@ public final class Pathfinder {
 
     private static boolean lineOfSight(World world, Vec3d eye, Vec3d target, BlockPos targetPos) {
         BlockHitResult hit = world.raycast(new RaycastContext(
-                eye, target, RaycastContext.ShapeType.COLLISION,
+                eye, target, RaycastContext.ShapeType.COLLIDER,
                 RaycastContext.FluidHandling.NONE, null));
         return hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(targetPos);
     }

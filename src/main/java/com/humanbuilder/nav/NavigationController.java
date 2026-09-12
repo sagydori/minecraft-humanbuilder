@@ -79,8 +79,9 @@ public final class NavigationController {
         press(client.options.jumpKey, stepUp || obstacle);
 
         // Stuck detection: barely moved while trying to walk.
-        double moved = player.getPos().distanceTo(lastPos);
-        lastPos = player.getPos();
+        Vec3d pp = new Vec3d(player.getX(), player.getY(), player.getZ());
+        double moved = pp.distanceTo(lastPos);
+        lastPos = pp;
         if (moved < 0.02) {
             if (++stationaryTicks > 40) return Status.STUCK;
         } else {
@@ -99,12 +100,23 @@ public final class NavigationController {
     }
 
     private boolean obstacleAhead(MinecraftClient client, ClientPlayerEntity player) {
-        Direction facing = Direction.fromRotation(player.getYaw());
+        Direction facing = horizontalFromYaw(player.getYaw());
         BlockPos feet = player.getBlockPos();
         BlockPos front = feet.offset(facing);
         boolean blocked = !client.world.getBlockState(front).getCollisionShape(client.world, front).isEmpty();
         boolean clearAbove = client.world.getBlockState(front.up()).getCollisionShape(client.world, front.up()).isEmpty();
         return blocked && clearAbove;
+    }
+
+    /** Nearest cardinal direction for a yaw: S=0°, W=90°, N=180°, E=270°. */
+    private static Direction horizontalFromYaw(float yaw) {
+        int i = Math.floorMod(Math.round(yaw / 90.0f), 4);
+        return switch (i) {
+            case 0 -> Direction.SOUTH;
+            case 1 -> Direction.WEST;
+            case 2 -> Direction.NORTH;
+            default -> Direction.EAST;
+        };
     }
 
     // ---------------------------------------------------------------------
@@ -142,7 +154,7 @@ public final class NavigationController {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player == null) return List.of();
         List<Vec3d> out = new ArrayList<>();
-        out.add(mc.player.getPos().add(0, 0.5, 0));
+        out.add(new Vec3d(mc.player.getX(), mc.player.getY() + 0.5, mc.player.getZ()));
         for (int i = index; i < path.size(); i++) {
             BlockPos p = path.get(i);
             out.add(new Vec3d(p.getX() + 0.5, p.getY() + 0.5, p.getZ() + 0.5));

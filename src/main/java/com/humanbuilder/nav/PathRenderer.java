@@ -2,55 +2,56 @@ package com.humanbuilder.nav;
 
 import com.humanbuilder.config.BuilderConfig;
 import com.humanbuilder.state.BuilderStateMachine;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.VertexConsumerProvider;
-import net.minecraft.client.util.math.MatrixStack;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.particle.DustParticleEffect;
 import net.minecraft.util.math.Vec3d;
-import org.joml.Matrix4f;
 
 import java.util.List;
 
 /**
- * Draws the active navigation path as a red line in the world so you can see
- * where the builder is walking.
+ * Marks the active navigation path in red so you can see where the builder is
+ * walking. Implemented with redstone-dust particles along the path rather than
+ * custom immediate-mode line rendering — the particle API is stable across the
+ * 1.21.9+ render-pipeline rework, whereas {@code RenderLayer.getLines()} / vertex
+ * consumers are not.
  */
 public final class PathRenderer {
+
+    /** Packed RGB red. */
+    private static final int RED = 0xFF3020;
+
+    private static int tickCounter;
 
     private PathRenderer() {}
 
     public static void register() {
-        WorldRenderEvents.AFTER_TRANSLUCENT.register(PathRenderer::onRender);
+        ClientTickEvents.END_CLIENT_TICK.register(PathRenderer::onTick);
     }
 
-    private static void onRender(WorldRenderContext ctx) {
+    private static void onTick(MinecraftClient client) {
         if (!BuilderConfig.INSTANCE.showPath) return;
         if (!BuilderStateMachine.INSTANCE.isControllingInput()) return;
+        if (client.world == null || client.player == null) return;
+        if ((tickCounter++ & 1) != 0) return; // spawn every other tick
 
         List<Vec3d> pts = NavigationController.INSTANCE.getRenderPath();
         if (pts.size() < 2) return;
 
-        MatrixStack ms = ctx.matrixStack();
-        VertexConsumerProvider consumers = ctx.consumers();
-        if (ms == null || consumers == null || ctx.camera() == null) return;
-
-        Vec3d cam = ctx.camera().getPos();
-        VertexConsumer vc = consumers.getBuffer(RenderLayer.getLines());
-        MatrixStack.Entry entry = ms.peek();
-        Matrix4f mat = entry.getPositionMatrix();
-
+        DustParticleEffect dust = new DustParticleEffect(RED, 1.0f);
         for (int i = 0; i < pts.size() - 1; i++) {
-            Vec3d a = pts.get(i).subtract(cam);
-            Vec3d b = pts.get(i + 1).subtract(cam);
-            float nx = (float) (b.x - a.x), ny = (float) (b.y - a.y), nz = (float) (b.z - a.z);
-            float len = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
-            if (len < 1.0e-4f) continue;
-            nx /= len; ny /= len; nz /= len;
-
-            vc.vertex(mat, (float) a.x, (float) a.y, (float) a.z).color(255, 30, 30, 255).normal(entry, nx, ny, nz);
-            vc.vertex(mat, (float) b.x, (float) b.y, (float) b.z).color(255, 30, 30, 255).normal(entry, nx, ny, nz);
+            Vec3d a = pts.get(i);
+            Vec3d b = pts.get(i + 1);
+            double dist = a.distanceTo(b);
+            int steps = Math.max(1, (int) (dist / 0.4));
+            for (int s = 0; s <= steps; s++) {
+                double t = (double) s / steps;
+                client.world.addParticle(dust,
+                        a.x + (b.x - a.x) * t,
+                        a.y + (b.y - a.y) * t,
+                        a.z + (b.z - a.z) * t,
+                        0, 0, 0);
+            }
         }
     }
 }
