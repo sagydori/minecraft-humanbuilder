@@ -11,6 +11,7 @@ import com.humanbuilder.physics.BlockPlacementMath;
 import com.humanbuilder.physics.BlockPlacementMath.PlacementSolution;
 import com.humanbuilder.scanner.SchematicBridge;
 import com.humanbuilder.scanner.Target;
+import com.humanbuilder.gui.BuilderScreen;
 import com.humanbuilder.stochastic.StochasticEngine;
 import com.humanbuilder.util.InputSimulator;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
@@ -63,6 +64,8 @@ public final class BuilderStateMachine {
 
     private long waitUntilMs = 0L;
     private long fetchStartMs = 0L;
+    /** Grace window after a placement during which a popped-up screen is auto-closed. */
+    private long allowScreenCloseUntil = 0L;
 
     // Per-stage diagnostic counters (surfaced in the status line while placed==0).
     private int diagSolveNull, diagFetchFail, diagVerifyFail, diagPlaceTry, diagPlaceFail;
@@ -99,10 +102,19 @@ public final class BuilderStateMachine {
             return;
         }
 
-        // Pause (don't fight the user) while any screen/chat is open.
+        // Screens: auto-close ones our own placement just opened (sign editor,
+        // accidental container) so we don't hang; otherwise pause for screens the
+        // user opened (chat, inventory, our menu).
         if (client.currentScreen != null) {
-            releaseAllInput(client);
-            return;
+            boolean placementScreen = controlling
+                    && !(client.currentScreen instanceof BuilderScreen)
+                    && System.currentTimeMillis() < allowScreenCloseUntil;
+            if (placementScreen) {
+                client.currentScreen.close();
+            } else {
+                releaseAllInput(client);
+                return;
+            }
         }
         // Safety: stop entirely if the player died.
         if (player.isDead() || player.getHealth() <= 0.0f) {
@@ -352,6 +364,9 @@ public final class BuilderStateMachine {
                 solution.hitVec(), solution.side(), solution.anchorPos(), false);
         client.interactionManager.interactBlock(player, HAND, hit);
         player.swingHand(HAND); // cosmetic arm swing (ActionResult is a sealed type now)
+        // Some blocks (signs, etc.) open an edit screen on placement; allow the
+        // screen guard to auto-close it for a short window so we don't hang.
+        allowScreenCloseUntil = System.currentTimeMillis() + 800L;
     }
 
     private void tickCooldown(MinecraftClient client, ClientPlayerEntity player) {

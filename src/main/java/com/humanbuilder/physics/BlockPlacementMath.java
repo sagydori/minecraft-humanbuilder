@@ -19,6 +19,7 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
@@ -162,6 +163,14 @@ public final class BlockPlacementMath {
      * coplanar neighbour at the very end is fine).
      */
     public static boolean reachable(World world, ClientPlayerEntity player, PlacementSolution sol) {
+        // Never place into the player's own body: if the target block space
+        // overlaps the player's bounding box, this isn't placeable from here.
+        BlockPos targetPos = sol.anchorPos().offset(sol.side());
+        Box targetBox = new Box(
+                targetPos.getX(), targetPos.getY(), targetPos.getZ(),
+                targetPos.getX() + 1, targetPos.getY() + 1, targetPos.getZ() + 1);
+        if (player.getBoundingBox().intersects(targetBox)) return false;
+
         Vec3d eye = player.getEyePos();
         Vec3d aim = sol.hitVec();
         double reach = player.getBlockInteractionRange();
