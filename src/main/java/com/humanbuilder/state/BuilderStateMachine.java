@@ -127,6 +127,15 @@ public final class BuilderStateMachine {
         return paused;
     }
 
+    /** World-space centre of the block currently being built or walked to (for the red line), or null. */
+    public Vec3d getActiveTargetCenter() {
+        if (solution != null) return solution.targetCenter();
+        if (navTarget != null) {
+            return new Vec3d(navTarget.getX() + 0.5, navTarget.getY() + 0.5, navTarget.getZ() + 0.5);
+        }
+        return null;
+    }
+
     /** Session build progress [0..1], or -1 if unknown. */
     public double progressFraction() {
         if (remainingEstimate < 0) return -1;

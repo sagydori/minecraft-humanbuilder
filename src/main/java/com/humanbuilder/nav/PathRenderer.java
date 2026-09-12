@@ -7,21 +7,22 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.particle.DustParticleEffect;
 import net.minecraft.util.math.Vec3d;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Marks the active navigation path in red so you can see where the builder is
- * walking. Implemented with redstone-dust particles along the path rather than
- * custom immediate-mode line rendering — the particle API is stable across the
- * 1.21.9+ render-pipeline rework, whereas {@code RenderLayer.getLines()} / vertex
- * consumers are not.
+ * Client-side red line showing where the builder is going: it traces the active
+ * navigation path, and — whenever there's a current target — a straight line from
+ * the player to the block being built/walked to. Drawn as a dense, fine trail of
+ * red redstone-dust particles (the 1.21.9+ render rework removed the simple
+ * in-world line API; a particle line is the version-stable, no-logic-impact way).
  */
 public final class PathRenderer {
 
-    /** Packed RGB red. */
-    private static final int RED = 0xFF3020;
-
-    private static int tickCounter;
+    private static final int RED = 0xFF1818;   // bright red
+    private static final float SCALE = 0.6f;   // small dust = fine line
+    private static final double SPACING = 0.28; // distance between dots along the line
+    private static final int MAX_POINTS = 220;  // per-frame budget
 
     private PathRenderer() {}
 
@@ -31,26 +32,39 @@ public final class PathRenderer {
 
     private static void onTick(MinecraftClient client) {
         if (!BuilderConfig.INSTANCE.showPath) return;
-        if (!BuilderStateMachine.INSTANCE.isControllingInput()) return;
-        if (client.world == null || client.player == null) return;
-        if ((tickCounter++ & 1) != 0) return; // spawn every other tick
+        if (!BuilderStateMachine.INSTANCE.isActive() || BuilderStateMachine.INSTANCE.isPaused()) return;
+        if (client.world == null || client.player == null || client.particleManager == null) return;
 
-        List<Vec3d> pts = NavigationController.INSTANCE.getRenderPath();
-        if (pts.size() < 2) return;
+        List<Vec3d> route = new ArrayList<>();
 
-        DustParticleEffect dust = new DustParticleEffect(RED, 1.0f);
-        for (int i = 0; i < pts.size() - 1; i++) {
-            Vec3d a = pts.get(i);
-            Vec3d b = pts.get(i + 1);
+        // Prefer the actual walking path; otherwise draw straight to the target.
+        List<Vec3d> nav = NavigationController.INSTANCE.getRenderPath();
+        if (nav.size() >= 2) {
+            route.addAll(nav);
+        } else {
+            Vec3d target = BuilderStateMachine.INSTANCE.getActiveTargetCenter();
+            if (target != null) {
+                route.add(client.player.getEyePos());
+                route.add(target);
+            }
+        }
+        if (route.size() < 2) return;
+
+        DustParticleEffect dust = new DustParticleEffect(RED, SCALE);
+        int budget = MAX_POINTS;
+        for (int i = 0; i < route.size() - 1 && budget > 0; i++) {
+            Vec3d a = route.get(i);
+            Vec3d b = route.get(i + 1);
             double dist = a.distanceTo(b);
-            int steps = Math.max(1, (int) (dist / 0.4));
-            for (int s = 0; s <= steps; s++) {
+            int steps = Math.max(1, (int) (dist / SPACING));
+            for (int s = 0; s <= steps && budget > 0; s++) {
                 double t = (double) s / steps;
                 client.particleManager.addParticle(dust,
                         a.x + (b.x - a.x) * t,
                         a.y + (b.y - a.y) * t,
                         a.z + (b.z - a.z) * t,
                         0.0, 0.0, 0.0);
+                budget--;
             }
         }
     }
