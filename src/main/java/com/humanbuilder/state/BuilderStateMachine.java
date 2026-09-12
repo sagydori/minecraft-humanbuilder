@@ -63,6 +63,7 @@ public final class BuilderStateMachine {
     // Full-schematic target cache.
     private final java.util.List<Target> targetCache = new java.util.ArrayList<>();
     private long lastScanMs = 0L;
+    private int currentLayerY = Integer.MIN_VALUE;
 
     // Scaffolding.
     private boolean buildingScaffold;
@@ -329,30 +330,34 @@ public final class BuilderStateMachine {
 
         Vec3d eye = player.getEyePos();
 
-        // Layer-by-layer, bottom-up: work only the lowest layer that still has
-        // non-blacklisted blocks (cache is sorted Y-ascending, so the first
-        // non-blacklisted target's Y is the current layer).
-        int layerY = Integer.MIN_VALUE;
-        for (Target t : targetCache) {
-            if (!blacklisted(t.pos())) { layerY = t.pos().getY(); break; }
+        // STRICT layer-by-layer: the true lowest unfinished Y of the entire build
+        // (not just the cached candidates), so a higher layer is never touched
+        // until the one below it is finished. Scans from the last layer upward.
+        int layerY = SchematicBridge.INSTANCE.lowestRemainingY(client, currentLayerY);
+        if (layerY == Integer.MAX_VALUE) {
+            layerY = SchematicBridge.INSTANCE.lowestRemainingY(client, Integer.MIN_VALUE);
         }
-        if (layerY == Integer.MIN_VALUE) {
+        if (layerY == Integer.MAX_VALUE) {
+            currentLayerY = Integer.MIN_VALUE;
             if (!idleReported) {
-                message(client, "§eHumanBuilder idle — nothing to build ("
+                message(client, "§aHumanBuilder: nothing left to build ("
                         + SchematicBridge.INSTANCE.getLastStats().summary() + ")");
                 idleReported = true;
             }
-            return; // nothing to do (done, waiting on supports, or all blacklisted)
+            return;
         }
+        currentLayerY = layerY;
         idleReported = false;
 
         // Pass A — group building: place everything reachable on THIS layer from
-        // where we stand, before walking anywhere. Bounded so it stays cheap.
+        // where we stand, before walking anywhere.
         int checked = 0;
+        boolean anyLayerInCache = false;
         for (Target t : targetCache) {
-            if (t.pos().getY() > layerY) break;         // higher layers wait
-            if (t.pos().getY() != layerY || blacklisted(t.pos())) continue;
-            if (checked++ >= 40) break;
+            if (t.pos().getY() != layerY) continue;
+            anyLayerInCache = true;
+            if (blacklisted(t.pos())) continue;
+            if (checked++ >= 60) break;
             PlacementSolution s = BlockPlacementMath.solve(client.world, player, t.pos(), t.state(), HAND);
             if (s == null) continue;
             if (BlockPlacementMath.reachable(client.world, player, s)
@@ -363,49 +368,65 @@ public final class BuilderStateMachine {
             }
         }
 
-        // Pass B — nothing reachable on this layer; go to the nearest one on it.
+        // Pass B — navigate/scaffold to the nearest block on this layer.
         Target chosen = null;
         for (Target t : targetCache) {
-            if (t.pos().getY() != layerY) continue;
-            if (!blacklisted(t.pos())) { chosen = t; break; }
+            if (t.pos().getY() == layerY && !blacklisted(t.pos())) { chosen = t; break; }
         }
-        if (chosen == null) return; // this layer's reachable work is done for now
-
-        PlacementSolution sol = BlockPlacementMath.solve(
-                client.world, player, chosen.pos(), chosen.state(), HAND);
-        if (sol == null) {
-            diagSolveNull++;
-            blacklist(chosen.pos(), 4_000);
+        if (chosen != null) {
+            PlacementSolution sol = BlockPlacementMath.solve(
+                    client.world, player, chosen.pos(), chosen.state(), HAND);
+            if (sol == null) {
+                diagSolveNull++;
+                noteFailure(chosen.pos());
+                targetCache.remove(chosen);
+                return;
+            }
+            boolean overlaps = BlockPlacementMath.overlapsPlayer(player, sol);
+            if (cfg.enableNavigation && startNavigation(client, player, chosen, sol)) {
+                Scaffolder.INSTANCE.reset();
+                scaffoldGoal = null;
+                navTarget = chosen.pos();
+                recoveryAttempts = 0;
+                state = State.NAVIGATING;
+                return;
+            }
+            if (overlaps) { forceSidestep(client); return; }
+            if (tryScaffold(client, player, chosen)) return;
+            noteFailure(chosen.pos());
             targetCache.remove(chosen);
             return;
         }
 
-        boolean overlaps = BlockPlacementMath.overlapsPlayer(player, sol);
+        // No buildable candidate for this layer in the cache.
+        if (anyLayerInCache) return; // some exist but are temporarily blacklisted — wait
 
-        // Walk to a spot from which we can build it (this is also how we "move
-        // away, then place" a block that is where we're standing).
-        if (cfg.enableNavigation && startNavigation(client, player, chosen, sol)) {
-            Scaffolder.INSTANCE.reset();
-            scaffoldGoal = null;
-            navTarget = chosen.pos();
-            recoveryAttempts = 0;
-            state = State.NAVIGATING;
-            return;
+        // Refresh once; if the layer still has no anchorable candidate, its
+        // remaining blocks can't be placed (e.g. floating) — skip them so we
+        // don't deadlock, and re-evaluate the layer from the bottom next tick.
+        targetCache.clear();
+        targetCache.addAll(SchematicBridge.INSTANCE.scan(client));
+        lastScanMs = now;
+        for (Target t : targetCache) {
+            if (t.pos().getY() == layerY && !blacklisted(t.pos())) return; // found some now
         }
-
-        // The block is where we stand but there's no standing spot to path to —
-        // physically step aside to vacate it, then it becomes placeable.
-        if (overlaps) {
-            forceSidestep(client);
-            return;
+        int skipped = SchematicBridge.INSTANCE.skipRemainingAt(client, layerY);
+        if (skipped > 0) {
+            message(client, "§eHumanBuilder: skipped " + skipped + " unbuildable block(s) at Y=" + layerY);
         }
+        currentLayerY = Integer.MIN_VALUE;
+    }
 
-        // Can't reach or path to it (usually too high) — build a staircase up.
-        if (tryScaffold(client, player, chosen)) return;
-
-        // Nothing we can do with it right now.
-        blacklist(chosen.pos(), 15_000);
-        targetCache.remove(chosen);
+    /** Count a failure for a block; permanently skip it after repeated failures. */
+    private void noteFailure(BlockPos p) {
+        long k = p.asLong();
+        int f = placeFails.merge(k, 1, Integer::sum);
+        if (f >= 6) {
+            SchematicBridge.INSTANCE.addSkip(p); // give up so the layer can complete
+            placeFails.remove(k);
+        } else {
+            blacklist(p, 5_000);
+        }
     }
 
     /** Physically back away for a moment (used to vacate a block we're standing in). */
@@ -641,7 +662,7 @@ public final class BuilderStateMachine {
 
     private void tickClicking(MinecraftClient client) {
         if (System.currentTimeMillis() < waitUntilMs) return;
-        performPlacement(client);
+        if (!performPlacement(client)) return; // skipped (e.g. would place into self) — state already set
         double factor = TPSMonitor.INSTANCE.getDelayFactor();
         waitUntilMs = System.currentTimeMillis()
                 + (long) StochasticEngine.INSTANCE.placementCooldownMs(factor);
@@ -654,9 +675,17 @@ public final class BuilderStateMachine {
      * packet on our behalf) and it does not depend on the crosshair happening to
      * land on the block, so it is far more reliable than driving the use key.
      */
-    private void performPlacement(MinecraftClient client) {
+    private boolean performPlacement(MinecraftClient client) {
         ClientPlayerEntity player = client.player;
-        if (player == null || solution == null || client.interactionManager == null) return;
+        if (player == null || solution == null || client.interactionManager == null) return false;
+        // Guard: the player may have drifted into the target during the pipeline —
+        // never place a block into our own body; step aside and retry instead.
+        if (!buildingScaffold && BlockPlacementMath.overlapsPlayer(player, solution)) {
+            forceSidestep(client);
+            clearTarget();
+            state = State.SCANNING;
+            return false;
+        }
         diagPlaceTry++;
         BlockHitResult hit = new BlockHitResult(
                 solution.hitVec(), solution.side(), solution.anchorPos(), false);
@@ -665,6 +694,7 @@ public final class BuilderStateMachine {
         // Some blocks (signs, etc.) open an edit screen on placement; allow the
         // screen guard to auto-close it for a short window so we don't hang.
         allowScreenCloseUntil = System.currentTimeMillis() + 800L;
+        return true;
     }
 
     private void tickCooldown(MinecraftClient client, ClientPlayerEntity player) {
@@ -688,12 +718,7 @@ public final class BuilderStateMachine {
                 placeFails.remove(key);
             } else {
                 diagPlaceFail++;
-                // Repeated placement failure → blacklist so we don't loop forever.
-                int fails = placeFails.merge(key, 1, Integer::sum);
-                if (fails >= 4) {
-                    blacklist(target.pos(), 30_000);
-                    placeFails.remove(key);
-                }
+                noteFailure(target.pos()); // blacklist, then permanently skip after repeats
             }
         }
         InputSimulator.setSneak(client, false);
@@ -737,6 +762,8 @@ public final class BuilderStateMachine {
         placeFails.clear();
         targetCache.clear();
         lastScanMs = 0L;
+        currentLayerY = Integer.MIN_VALUE;
+        SchematicBridge.INSTANCE.clearSkips();
         Scaffolder.INSTANCE.reset();
         scaffoldGoal = null;
         scaffoldAttempts = 0;
@@ -772,6 +799,8 @@ public final class BuilderStateMachine {
         placeFails.clear();
         targetCache.clear();
         lastScanMs = 0L;
+        currentLayerY = Integer.MIN_VALUE;
+        SchematicBridge.INSTANCE.clearSkips();
         Scaffolder.INSTANCE.reset();
         scaffoldGoal = null;
         scaffoldAttempts = 0;

@@ -23,19 +23,28 @@ import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
- * Module F — The Litematica Bridge. Scans the WHOLE selected schematic (not just
- * a small radius) bottom-up, so the builder can find the next placeable block
- * anywhere and walk to it. The scan is capped and collected lowest-Y first, so it
- * naturally focuses on the lowest unfinished layer and stays cheap.
+ * Module F — The Litematica Bridge. Scans the whole selected schematic and finds
+ * placeable targets. Layer order is driven by {@link #lowestRemainingY} (the true
+ * lowest unfinished Y across the whole build, not just the cached candidates), so
+ * the builder finishes each layer before the next — never placing a higher block
+ * whose support doesn't exist yet.
  */
 public final class SchematicBridge {
 
     public static final SchematicBridge INSTANCE = new SchematicBridge();
 
     private SchematicBridge() {}
+
+    /** Blocks we've given up on (unbuildable) so layers can still advance. */
+    private final Set<Long> skip = new HashSet<>();
+
+    public void addSkip(BlockPos p) { skip.add(p.asLong()); }
+    public void clearSkips() { skip.clear(); }
 
     public static final class ScanStats {
         public boolean schemNull;
@@ -50,10 +59,106 @@ public final class SchematicBridge {
     }
 
     private volatile ScanStats lastStats = new ScanStats();
+    public ScanStats getLastStats() { return lastStats; }
+    public volatile boolean lastRemainingCapped;
 
-    public ScanStats getLastStats() {
-        return lastStats;
+    // ---------------------------------------------------------------------
+    //  Remaining / layer queries
+    // ---------------------------------------------------------------------
+
+    /** True if this cell still needs a block placed (schematic ≠ real, placeable). */
+    private static boolean isRemaining(BlockState want, BlockState have) {
+        if (want.isAir()) return false;
+        if ((want.contains(Properties.DOUBLE_BLOCK_HALF)
+                && want.get(Properties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER)
+                || (want.contains(Properties.BED_PART)
+                && want.get(Properties.BED_PART) == BedPart.HEAD)) return false;
+        if (have == want) return false;
+        return have.isAir() || have.isReplaceable();
     }
+
+    /**
+     * The lowest Y (>= {@code startY}) that still has an unfinished, non-skipped
+     * schematic block, or {@link Integer#MAX_VALUE} if none. Scanning starts at
+     * {@code startY} (everything below is assumed done) to stay cheap.
+     */
+    public int lowestRemainingY(MinecraftClient client, int startY) {
+        ClientPlayerEntity player = client.player;
+        ClientWorld real = client.world;
+        WorldSchematic schem = SchematicWorldHandler.getSchematicWorld();
+        if (player == null || real == null || schem == null) return Integer.MAX_VALUE;
+
+        int[] r = region(player);
+        int y0 = Math.max(r[1], startY);
+        var cm = schem.getChunkManager();
+        BlockPos.Mutable pos = new BlockPos.Mutable();
+        long iter = 0, cap = 2_000_000L;
+
+        for (int y = y0; y <= r[4]; y++) {
+            for (int x = r[0]; x <= r[3]; x++) {
+                for (int z = r[2]; z <= r[5]; z++) {
+                    if (++iter > cap) return Integer.MAX_VALUE;
+                    pos.set(x, y, z);
+                    if (skip.contains(pos.asLong())) continue;
+                    if (!cm.isChunkLoaded(x >> 4, z >> 4)) continue;
+                    if (isRemaining(schem.getBlockState(pos), real.getBlockState(pos))) return y;
+                }
+            }
+        }
+        return Integer.MAX_VALUE;
+    }
+
+    /** Give up on every remaining block at layer {@code y} (used to break deadlocks). */
+    public int skipRemainingAt(MinecraftClient client, int y) {
+        ClientPlayerEntity player = client.player;
+        ClientWorld real = client.world;
+        WorldSchematic schem = SchematicWorldHandler.getSchematicWorld();
+        if (player == null || real == null || schem == null) return 0;
+        int[] r = region(player);
+        var cm = schem.getChunkManager();
+        BlockPos.Mutable pos = new BlockPos.Mutable();
+        int n = 0;
+        for (int x = r[0]; x <= r[3]; x++) {
+            for (int z = r[2]; z <= r[5]; z++) {
+                pos.set(x, y, z);
+                if (skip.contains(pos.asLong())) continue;
+                if (!cm.isChunkLoaded(x >> 4, z >> 4)) continue;
+                if (isRemaining(schem.getBlockState(pos), real.getBlockState(pos))) {
+                    skip.add(pos.asLong());
+                    n++;
+                }
+            }
+        }
+        return n;
+    }
+
+    public int countRemaining(MinecraftClient client) {
+        ClientPlayerEntity player = client.player;
+        ClientWorld real = client.world;
+        WorldSchematic schem = SchematicWorldHandler.getSchematicWorld();
+        lastRemainingCapped = false;
+        if (player == null || real == null || schem == null) return -1;
+
+        int[] r = region(player);
+        var cm = schem.getChunkManager();
+        BlockPos.Mutable pos = new BlockPos.Mutable();
+        long iter = 0, cap = 600_000L;
+        int count = 0;
+        for (int y = r[1]; y <= r[4]; y++)
+            for (int x = r[0]; x <= r[3]; x++)
+                for (int z = r[2]; z <= r[5]; z++) {
+                    if (++iter > cap) { lastRemainingCapped = true; return count; }
+                    pos.set(x, y, z);
+                    if (skip.contains(pos.asLong())) continue;
+                    if (!cm.isChunkLoaded(x >> 4, z >> 4)) continue;
+                    if (isRemaining(schem.getBlockState(pos), real.getBlockState(pos))) count++;
+                }
+        return count;
+    }
+
+    // ---------------------------------------------------------------------
+    //  Candidate scan (only blocks that can be anchored + we have the item)
+    // ---------------------------------------------------------------------
 
     public List<Target> scan(MinecraftClient client) {
         ScanStats st = new ScanStats();
@@ -71,23 +176,19 @@ public final class SchematicBridge {
         Vec3d eye = player.getEyePos();
         BlockPos feet = player.getBlockPos();
 
-        int[] region = region(player);
-        int x0 = region[0], y0 = region[1], z0 = region[2];
-        int x1 = region[3], y1 = region[4], z1 = region[5];
-
+        int[] r = region(player);
         var chunkManager = schem.getChunkManager();
         List<Target> out = new ArrayList<>();
         BlockPos.Mutable pos = new BlockPos.Mutable();
         long iterations = 0;
 
-        // Bottom-up: iterate Y ascending and stop once we have enough candidates,
-        // which keeps us on the lowest unfinished layers.
         outer:
-        for (int y = y0; y <= y1; y++) {
-            for (int x = x0; x <= x1; x++) {
-                for (int z = z0; z <= z1; z++) {
+        for (int y = r[1]; y <= r[4]; y++) {
+            for (int x = r[0]; x <= r[3]; x++) {
+                for (int z = r[2]; z <= r[5]; z++) {
                     if (++iterations > cfg.maxScanIterations) break outer;
                     pos.set(x, y, z);
+                    if (skip.contains(pos.asLong())) continue;
                     if (!chunkManager.isChunkLoaded(x >> 4, z >> 4)) continue;
 
                     BlockState want = schem.getBlockState(pos);
@@ -95,14 +196,10 @@ public final class SchematicBridge {
                     st.seen++;
 
                     if (pos.equals(feet) || pos.equals(feet.up())) { st.selfBody++; continue; }
-
                     if ((want.contains(Properties.DOUBLE_BLOCK_HALF)
                             && want.get(Properties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER)
                             || (want.contains(Properties.BED_PART)
-                            && want.get(Properties.BED_PART) == BedPart.HEAD)) {
-                        st.doubleHalf++;
-                        continue;
-                    }
+                            && want.get(Properties.BED_PART) == BedPart.HEAD)) { st.doubleHalf++; continue; }
 
                     BlockState have = real.getBlockState(pos);
                     if (have == want) { st.alreadyOk++; continue; }
@@ -127,46 +224,10 @@ public final class SchematicBridge {
         return out;
     }
 
-    /** Total blocks still needing placement in the whole schematic (for ETA). Approximate if capped. */
-    public volatile boolean lastRemainingCapped;
+    // ---------------------------------------------------------------------
+    //  Region helpers
+    // ---------------------------------------------------------------------
 
-    public int countRemaining(MinecraftClient client) {
-        ClientPlayerEntity player = client.player;
-        ClientWorld real = client.world;
-        WorldSchematic schem = SchematicWorldHandler.getSchematicWorld();
-        lastRemainingCapped = false;
-        if (player == null || real == null || schem == null) return -1;
-
-        int[] r = region(player);
-        var chunkManager = schem.getChunkManager();
-        BlockPos.Mutable pos = new BlockPos.Mutable();
-        long iterations = 0;
-        long cap = 600_000L;
-        int count = 0;
-
-        for (int y = r[1]; y <= r[4]; y++) {
-            for (int x = r[0]; x <= r[3]; x++) {
-                for (int z = r[2]; z <= r[5]; z++) {
-                    if (++iterations > cap) { lastRemainingCapped = true; return count; }
-                    pos.set(x, y, z);
-                    if (!chunkManager.isChunkLoaded(x >> 4, z >> 4)) continue;
-                    BlockState want = schem.getBlockState(pos);
-                    if (want.isAir()) continue;
-                    if ((want.contains(Properties.DOUBLE_BLOCK_HALF)
-                            && want.get(Properties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER)
-                            || (want.contains(Properties.BED_PART)
-                            && want.get(Properties.BED_PART) == BedPart.HEAD)) continue;
-                    BlockState have = real.getBlockState(pos);
-                    if (have == want) continue;
-                    if (!have.isAir() && !have.isReplaceable()) continue;
-                    count++;
-                }
-            }
-        }
-        return count;
-    }
-
-    /** Region [x0,y0,z0,x1,y1,z1] to scan: chosen bounds, else all placements, else a box near the player. */
     private static int[] region(ClientPlayerEntity player) {
         Box b = BuilderConfig.INSTANCE.buildBounds;
         if (b != null) {
@@ -176,15 +237,12 @@ public final class SchematicBridge {
         }
         int[] pb = allPlacementsBox();
         if (pb != null) return pb;
-        // Last resort: a modest box around the player (small enough to fit the
-        // scan budget so we don't exhaust it in empty layers below the build).
         BlockPos f = player.getBlockPos();
         int rh = 24;
         return new int[]{f.getX() - rh, f.getY() - 16, f.getZ() - rh,
                 f.getX() + rh, f.getY() + 48, f.getZ() + rh};
     }
 
-    /** Union of every loaded Litematica placement's enclosing box (whole schematic). */
     private static int[] allPlacementsBox() {
         try {
             var mgr = DataManager.getSchematicPlacementManager();
