@@ -127,7 +127,7 @@ public final class SchematicBridge {
         return out;
     }
 
-    /** Region [x0,y0,z0,x1,y1,z1] to scan: chosen bounds, else selected placement, else a radius box. */
+    /** Region [x0,y0,z0,x1,y1,z1] to scan: chosen bounds, else all placements, else a box near the player. */
     private static int[] region(ClientPlayerEntity player) {
         Box b = BuilderConfig.INSTANCE.buildBounds;
         if (b != null) {
@@ -135,27 +135,39 @@ public final class SchematicBridge {
                     MathHelper.floor(b.minX), MathHelper.floor(b.minY), MathHelper.floor(b.minZ),
                     MathHelper.ceil(b.maxX) - 1, MathHelper.ceil(b.maxY) - 1, MathHelper.ceil(b.maxZ) - 1};
         }
-        int[] pb = placementBox();
+        int[] pb = allPlacementsBox();
         if (pb != null) return pb;
-        int r = (int) Math.ceil(BuilderConfig.INSTANCE.scanRadius);
+        // Last resort: a modest box around the player (small enough to fit the
+        // scan budget so we don't exhaust it in empty layers below the build).
         BlockPos f = player.getBlockPos();
-        return new int[]{f.getX() - r, f.getY() - r, f.getZ() - r,
-                f.getX() + r, f.getY() + r, f.getZ() + r};
+        int rh = 24;
+        return new int[]{f.getX() - rh, f.getY() - 16, f.getZ() - rh,
+                f.getX() + rh, f.getY() + 48, f.getZ() + rh};
     }
 
-    private static int[] placementBox() {
+    /** Union of every loaded Litematica placement's enclosing box (whole schematic). */
+    private static int[] allPlacementsBox() {
         try {
             var mgr = DataManager.getSchematicPlacementManager();
             if (mgr == null) return null;
-            SchematicPlacement p = mgr.getSelectedSchematicPlacement();
-            if (p == null) return null;
-            fi.dy.masa.litematica.selection.Box box = p.getEclosingBox();
-            if (box == null) return null;
-            BlockPos c1 = box.getPos1(), c2 = box.getPos2();
-            if (c1 == null || c2 == null) return null;
-            return new int[]{
-                    Math.min(c1.getX(), c2.getX()), Math.min(c1.getY(), c2.getY()), Math.min(c1.getZ(), c2.getZ()),
-                    Math.max(c1.getX(), c2.getX()), Math.max(c1.getY(), c2.getY()), Math.max(c1.getZ(), c2.getZ())};
+            int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+            int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+            boolean any = false;
+            for (SchematicPlacement p : mgr.getAllSchematicsPlacements()) {
+                if (p == null) continue;
+                fi.dy.masa.litematica.selection.Box box = p.getEclosingBox();
+                if (box == null) continue;
+                BlockPos c1 = box.getPos1(), c2 = box.getPos2();
+                if (c1 == null || c2 == null) continue;
+                minX = Math.min(minX, Math.min(c1.getX(), c2.getX()));
+                minY = Math.min(minY, Math.min(c1.getY(), c2.getY()));
+                minZ = Math.min(minZ, Math.min(c1.getZ(), c2.getZ()));
+                maxX = Math.max(maxX, Math.max(c1.getX(), c2.getX()));
+                maxY = Math.max(maxY, Math.max(c1.getY(), c2.getY()));
+                maxZ = Math.max(maxZ, Math.max(c1.getZ(), c2.getZ()));
+                any = true;
+            }
+            return any ? new int[]{minX, minY, minZ, maxX, maxY, maxZ} : null;
         } catch (Throwable t) {
             return null;
         }
