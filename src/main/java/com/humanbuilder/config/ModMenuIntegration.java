@@ -1,0 +1,68 @@
+package com.humanbuilder.config;
+
+import com.terraformersmc.modmenu.api.ConfigScreenFactory;
+import com.terraformersmc.modmenu.api.ModMenuApi;
+import me.shedaniel.clothconfig2.api.ConfigBuilder;
+import me.shedaniel.clothconfig2.api.ConfigCategory;
+import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.text.Text;
+
+/**
+ * Optional Mod Menu + Cloth Config screen. Only active when both mods are
+ * installed; the core builder runs fine without either. Entries read/write the
+ * plain fields on {@link BuilderConfig}.
+ */
+public class ModMenuIntegration implements ModMenuApi {
+
+    @Override
+    public ConfigScreenFactory<?> getModConfigScreenFactory() {
+        return ModMenuIntegration::build;
+    }
+
+    private static Screen build(Screen parent) {
+        BuilderConfig cfg = BuilderConfig.INSTANCE;
+        ConfigBuilder builder = ConfigBuilder.create()
+                .setParentScreen(parent)
+                .setTitle(Text.literal("HumanBuilder"));
+        ConfigEntryBuilder eb = builder.entryBuilder();
+
+        ConfigCategory general = builder.getOrCreateCategory(Text.literal("General"));
+        general.addEntry(eb.startBooleanToggle(Text.literal("Enabled"), cfg.enabled)
+                .setSaveConsumer(v -> cfg.enabled = v).build());
+        general.addEntry(eb.startDoubleField(Text.literal("Scan radius (blocks)"), cfg.scanRadius)
+                .setMin(1.0).setMax(6.0).setSaveConsumer(v -> cfg.scanRadius = v).build());
+        general.addEntry(eb.startBooleanToggle(Text.literal("Block user input while active"), cfg.blockUserInput)
+                .setSaveConsumer(v -> cfg.blockUserInput = v).build());
+        general.addEntry(eb.startBooleanToggle(Text.literal("Report build-rate estimate"), cfg.reportEstimate)
+                .setSaveConsumer(v -> cfg.reportEstimate = v).build());
+
+        ConfigCategory aim = builder.getOrCreateCategory(Text.literal("Aim realism"));
+        aim.addEntry(eb.startBooleanToggle(Text.literal("Micro-tremor"), cfg.enableTremor)
+                .setSaveConsumer(v -> cfg.enableTremor = v).build());
+        aim.addEntry(eb.startBooleanToggle(Text.literal("Overshoot / correction"), cfg.enableOvershoot)
+                .setSaveConsumer(v -> cfg.enableOvershoot = v).build());
+        aim.addEntry(eb.startBooleanToggle(Text.literal("Mouse quantization"), cfg.enableQuantization)
+                .setSaveConsumer(v -> cfg.enableQuantization = v).build());
+        aim.addEntry(eb.startDoubleField(Text.literal("Overshoot chance"), cfg.overshootChance)
+                .setMin(0.0).setMax(1.0).setSaveConsumer(v -> cfg.overshootChance = v).build());
+
+        ConfigCategory timing = builder.getOrCreateCategory(Text.literal("Timing"));
+        timing.addEntry(eb.startDoubleField(Text.literal("Click delay mean (ms)"), cfg.clickDelayMeanMs)
+                .setMin(0.0).setSaveConsumer(v -> cfg.clickDelayMeanMs = v).build());
+        timing.addEntry(eb.startDoubleField(Text.literal("Click delay std (ms)"), cfg.clickDelayStdMs)
+                .setMin(0.0).setSaveConsumer(v -> cfg.clickDelayStdMs = v).build());
+        timing.addEntry(eb.startDoubleField(Text.literal("Fatigue per minute"), cfg.fatiguePerMinute)
+                .setMin(0.0).setSaveConsumer(v -> cfg.fatiguePerMinute = v).build());
+        timing.addEntry(eb.startDoubleField(Text.literal("Fatigue cap"), cfg.fatigueCap)
+                .setMin(1.0).setSaveConsumer(v -> cfg.fatigueCap = v).build());
+        timing.addEntry(eb.startDoubleField(Text.literal("Misclick chance"), cfg.misclickChance)
+                .setMin(0.0).setMax(1.0).setSaveConsumer(v -> cfg.misclickChance = v).build());
+        timing.addEntry(eb.startDoubleField(Text.literal("Hesitation chance"), cfg.hesitationChance)
+                .setMin(0.0).setMax(1.0).setSaveConsumer(v -> cfg.hesitationChance = v).build());
+        timing.addEntry(eb.startDoubleField(Text.literal("Pause below TPS"), cfg.pauseBelowTps)
+                .setMin(0.0).setMax(20.0).setSaveConsumer(v -> cfg.pauseBelowTps = v).build());
+
+        return builder.build();
+    }
+}

@@ -1,0 +1,24 @@
+# Gradle / build
+.gradle/
+build/
+out/
+run/
+
+# Downloaded mod dependencies (CI fetches these; keep only the note file)
+libs/*.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+bin/
+
+# OS
+*.log
+Thumbs.db
+.DS_Store

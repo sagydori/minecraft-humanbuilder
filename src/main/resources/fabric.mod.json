@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "humanbuilder",
+  "version": "${version}",
+  "name": "HumanBuilder",
+  "description": "Autonomous, human-input-simulating Litematica schematic builder for singleplayer / private-server build-time estimation. Client-side only; no packet injection.",
+  "authors": [ "Dori" ],
+  "contact": {},
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [ "com.humanbuilder.HumanBuilderClient" ],
+    "modmenu": [ "com.humanbuilder.config.ModMenuIntegration" ]
+  },
+  "mixins": [ "humanbuilder.mixins.json" ],
+  "depends": {
+    "fabricloader": ">=0.16.2",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*",
+    "litematica": "*",
+    "malilib": "*"
+  },
+  "suggests": {
+    "cloth-config": "*",
+    "modmenu": "*"
+  }
+}

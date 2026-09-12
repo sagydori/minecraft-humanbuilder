@@ -1,0 +1,14 @@
+Drop the Minecraft 1.21.11 jars for:
+
+  * Litematica  (sakura-ryoko fork, 0.26.11 or newer)  ->  litematica-fabric-1.21.11-*.jar
+  * malilib      (matching version)                     ->  malilib-fabric-1.21.11-*.jar
+
+into THIS folder. build.gradle compiles against every *.jar found here
+(modCompileOnly). Download them from:
+
+  https://modrinth.com/mod/litematica/versions   (filter: 1.21.11, Fabric)
+  https://modrinth.com/mod/malilib/versions       (filter: 1.21.11, Fabric)
+
+You also need them installed as normal mods in your .minecraft/mods folder
+to actually run (or uncomment `modLocalRuntime` in build.gradle to launch
+the dev client with them).
