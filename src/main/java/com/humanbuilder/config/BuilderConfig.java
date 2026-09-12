@@ -49,6 +49,20 @@ public final class BuilderConfig {
     /** Below this TPS the bot pauses entirely (blueprint: 10). */
     public double pauseBelowTps = 10.0;
 
+    // --- Navigation / pathfinding ---
+    /** Master enable for autonomous movement to out-of-reach targets. */
+    public boolean enableNavigation = true;
+    /** Draw the current path as a red line in the world. */
+    public boolean showPath = true;
+    /** Targets farther than this (blocks, eye→target) trigger NAVIGATING. */
+    public double navReach = 3.5;
+    /** Maximum drop height A* will path down in one step. */
+    public int maxFallDistance = 3;
+    /** Safety cap on A* node expansions (keeps it "lightweight"). */
+    public int maxPathIterations = 4000;
+    /** Camera turn rate while navigating, degrees per tick. */
+    public double turnSpeedDegPerTick = 22.0;
+
     // --- Safety / debug ---
     /** If true, log the estimated remaining time to chat periodically. */
     public boolean reportEstimate = true;

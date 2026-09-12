@@ -1,6 +1,7 @@
 package com.humanbuilder;
 
 import com.humanbuilder.config.BuilderConfig;
+import com.humanbuilder.nav.PathRenderer;
 import com.humanbuilder.state.BuilderStateMachine;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -49,6 +50,9 @@ public class HumanBuilderClient implements ClientModInitializer {
             BuilderConfig.INSTANCE.enabled = false;
             BuilderStateMachine.INSTANCE.reset();
         });
+
+        // Red path line rendering.
+        PathRenderer.register();
 
         LOGGER.info("HumanBuilder initialized. Toggle with the configured key (default: B).");
     }

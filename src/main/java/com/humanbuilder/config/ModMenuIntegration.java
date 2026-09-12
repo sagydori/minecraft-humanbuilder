@@ -63,6 +63,20 @@ public class ModMenuIntegration implements ModMenuApi {
         timing.addEntry(eb.startDoubleField(Text.literal("Pause below TPS"), cfg.pauseBelowTps)
                 .setMin(0.0).setMax(20.0).setSaveConsumer(v -> cfg.pauseBelowTps = v).build());
 
+        ConfigCategory nav = builder.getOrCreateCategory(Text.literal("Navigation"));
+        nav.addEntry(eb.startBooleanToggle(Text.literal("Enable navigation"), cfg.enableNavigation)
+                .setSaveConsumer(v -> cfg.enableNavigation = v).build());
+        nav.addEntry(eb.startBooleanToggle(Text.literal("Show red path line"), cfg.showPath)
+                .setSaveConsumer(v -> cfg.showPath = v).build());
+        nav.addEntry(eb.startDoubleField(Text.literal("Navigate when farther than (blocks)"), cfg.navReach)
+                .setMin(1.5).setMax(6.0).setSaveConsumer(v -> cfg.navReach = v).build());
+        nav.addEntry(eb.startIntField(Text.literal("Max fall distance"), cfg.maxFallDistance)
+                .setMin(0).setMax(10).setSaveConsumer(v -> cfg.maxFallDistance = v).build());
+        nav.addEntry(eb.startIntField(Text.literal("Max A* iterations"), cfg.maxPathIterations)
+                .setMin(500).setMax(20000).setSaveConsumer(v -> cfg.maxPathIterations = v).build());
+        nav.addEntry(eb.startDoubleField(Text.literal("Turn speed (deg/tick)"), cfg.turnSpeedDegPerTick)
+                .setMin(2.0).setMax(90.0).setSaveConsumer(v -> cfg.turnSpeedDegPerTick = v).build());
+
         return builder.build();
     }
 }

@@ -4,6 +4,8 @@ import com.humanbuilder.aim.HumanAimController;
 import com.humanbuilder.config.BuilderConfig;
 import com.humanbuilder.inventory.InventoryManager;
 import com.humanbuilder.inventory.MissingItemException;
+import com.humanbuilder.nav.NavigationController;
+import com.humanbuilder.nav.Pathfinder;
 import com.humanbuilder.network.TPSMonitor;
 import com.humanbuilder.physics.BlockPlacementMath;
 import com.humanbuilder.physics.BlockPlacementMath.PlacementSolution;
@@ -15,22 +17,26 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Module G — Master State Machine. Runs from {@code MinecraftClient#tick} (TAIL)
- * via mixin. Coordinates scan → fetch → aim → verify → click → cooldown, with TPS
- * pausing and human-error injection, and tracks throughput for build-time
- * estimation (the actual point of the tool).
+ * via mixin. Coordinates scan → (navigate) → fetch → aim → verify → click →
+ * cooldown, with TPS pausing, human-error injection, autonomous movement to
+ * out-of-reach targets, and a blacklist that prevents infinite retry loops.
  */
 public final class BuilderStateMachine {
 
     public static final BuilderStateMachine INSTANCE = new BuilderStateMachine();
 
     public enum State {
-        IDLE, SCANNING, FETCHING_ITEM, PATHING_TO_ANCHOR,
+        IDLE, SCANNING, NAVIGATING, ARRIVED, STUCK_RECOVERY,
+        FETCHING_ITEM, PATHING_TO_ANCHOR,
         AIMING, VERIFYING_PHYSICS, CLICKING, COOLDOWN, PAUSED_LAG
     }
 
@@ -44,7 +50,15 @@ public final class BuilderStateMachine {
     private boolean misclickPending;
     private int clickHoldTicks;
 
-    /** Wall-clock gate; states that wait compare against this. */
+    // Navigation.
+    private BlockPos navTarget;
+    private int recoveryTicks;
+    private int recoveryAttempts;
+
+    /** Temporary skip-lists keyed by BlockPos.asLong() → expiry epoch-ms / fail count. */
+    private final Map<Long, Long> blacklistUntil = new HashMap<>();
+    private final Map<Long, Integer> placeFails = new HashMap<>();
+
     private long waitUntilMs = 0L;
 
     // --- Build-time estimation ---
@@ -79,6 +93,19 @@ public final class BuilderStateMachine {
             return;
         }
 
+        // Pause (don't fight the user) while any screen/chat is open.
+        if (client.currentScreen != null) {
+            releaseAllInput(client);
+            return;
+        }
+        // Safety: stop entirely if the player died.
+        if (player.isDead() || player.getHealth() <= 0.0f) {
+            message(client, "§cHumanBuilder stopped — player died");
+            cfg.enabled = false;
+            shutdown(client);
+            return;
+        }
+
         if (!controlling) startup();
 
         // Global TPS gate.
@@ -93,6 +120,9 @@ public final class BuilderStateMachine {
         switch (state) {
             case IDLE -> state = State.SCANNING;
             case SCANNING -> tickScanning(client, player);
+            case NAVIGATING -> tickNavigating(client);
+            case ARRIVED -> tickArrived(client, player);
+            case STUCK_RECOVERY -> tickStuckRecovery(client, player);
             case FETCHING_ITEM -> tickFetching(client);
             case PATHING_TO_ANCHOR -> tickPathing(client);
             case AIMING -> tickAiming(client);
@@ -106,12 +136,32 @@ public final class BuilderStateMachine {
     }
 
     // ---------------------------------------------------------------------
-    //  States
+    //  Scan / navigate
     // ---------------------------------------------------------------------
 
     private void tickScanning(MinecraftClient client, ClientPlayerEntity player) {
+        BuilderConfig cfg = BuilderConfig.INSTANCE;
         List<Target> targets = SchematicBridge.INSTANCE.scan(client);
+        double reachSq = cfg.navReach * cfg.navReach;
+        Vec3d eye = player.getEyePos();
+
         for (Target t : targets) {
+            if (blacklisted(t.pos())) continue;
+
+            double d2 = eye.squaredDistanceTo(Vec3d.ofCenter(t.pos()));
+            if (cfg.enableNavigation && d2 > reachSq) {
+                if (startNavigation(client, player, t.pos())) {
+                    navTarget = t.pos();
+                    recoveryAttempts = 0;
+                    state = State.NAVIGATING;
+                } else {
+                    blacklist(t.pos(), 20_000); // can't reach it right now
+                    continue;
+                }
+                return;
+            }
+
+            // In reach — try to build it.
             PlacementSolution sol = BlockPlacementMath.solve(
                     client.world, player, t.pos(), t.state(), HAND);
             if (sol != null) {
@@ -122,9 +172,75 @@ public final class BuilderStateMachine {
                 state = State.FETCHING_ITEM;
                 return;
             }
+            // No placement geometry from here — skip briefly so we don't spin on it.
+            blacklist(t.pos(), 4_000);
         }
-        // Nothing placeable in range this tick; remain SCANNING (idle spin).
+        // Nothing actionable this tick; remain SCANNING.
     }
+
+    private boolean startNavigation(MinecraftClient client, ClientPlayerEntity player, BlockPos target) {
+        BlockPos stand = Pathfinder.findStandingPosition(
+                client.world, target, player.getBlockPos(), BuilderConfig.INSTANCE.navReach);
+        if (stand == null) return false;
+        if (player.getBlockPos().equals(stand)) {
+            NavigationController.INSTANCE.setPath(List.of());
+            return true;
+        }
+        List<BlockPos> path = Pathfinder.findPath(client.world, player.getBlockPos(), stand);
+        if (path.isEmpty()) return false;
+        NavigationController.INSTANCE.setPath(path);
+        return true;
+    }
+
+    private void tickNavigating(MinecraftClient client) {
+        switch (NavigationController.INSTANCE.tick(client)) {
+            case ARRIVED -> { NavigationController.INSTANCE.stop(client); state = State.ARRIVED; }
+            case STUCK -> { recoveryTicks = 0; state = State.STUCK_RECOVERY; }
+            case FAILED -> {
+                NavigationController.INSTANCE.stop(client);
+                blacklist(navTarget, 15_000);
+                navTarget = null;
+                state = State.SCANNING;
+            }
+            case NAVIGATING -> { /* keep walking */ }
+        }
+    }
+
+    private void tickArrived(MinecraftClient client, ClientPlayerEntity player) {
+        NavigationController.INSTANCE.stop(client);
+        if (navTarget != null) {
+            double reachSq = BuilderConfig.INSTANCE.navReach * BuilderConfig.INSTANCE.navReach;
+            if (player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(navTarget)) > reachSq) {
+                blacklist(navTarget, 15_000); // arrived but still not close enough
+            }
+        }
+        navTarget = null;
+        recoveryAttempts = 0;
+        state = State.SCANNING;
+    }
+
+    private void tickStuckRecovery(MinecraftClient client, ClientPlayerEntity player) {
+        recoveryTicks++;
+        NavigationController.INSTANCE.tickRecovery(client, recoveryTicks);
+        if (recoveryTicks < 12) return;
+
+        NavigationController.INSTANCE.stop(client);
+        recoveryTicks = 0;
+        recoveryAttempts++;
+
+        if (navTarget == null || recoveryAttempts > 2 || !startNavigation(client, player, navTarget)) {
+            blacklist(navTarget, 20_000);
+            navTarget = null;
+            recoveryAttempts = 0;
+            state = State.SCANNING;
+        } else {
+            state = State.NAVIGATING;
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    //  Build
+    // ---------------------------------------------------------------------
 
     private void tickFetching(MinecraftClient client) {
         try {
@@ -132,14 +248,11 @@ public final class BuilderStateMachine {
                 state = State.PATHING_TO_ANCHOR;
             }
         } catch (MissingItemException e) {
-            // Shouldn't normally happen (scan pre-filters by inventory), but stay safe.
             abortTarget();
         }
     }
 
     private void tickPathing(MinecraftClient client) {
-        // Basic: if placing against an interactable block, hold sneak so the
-        // click places instead of opening the block. No walking pathfinding.
         if (solution != null && solution.requiresSneak()) {
             InputSimulator.setSneak(client, true);
         }
@@ -159,11 +272,10 @@ public final class BuilderStateMachine {
         HumanAimController aim = HumanAimController.INSTANCE;
         boolean settled = aim.tick(client);
 
-        // Misclick model: fire 1–2 ticks early, before the crosshair fully settles.
         if (!settled && misclickPending && aim.inPrimaryPhase() && aim.currentProgress() >= 0.9) {
             misclickPending = false;
             aim.cancel();
-            beginClicking(client, /*skipVerify=*/true);
+            beginClicking(client);
             return;
         }
         if (settled) {
@@ -176,33 +288,31 @@ public final class BuilderStateMachine {
         boolean ok = BlockPlacementMath.confirm(client.world, player, target.state(), HAND, solution)
                 && BlockPlacementMath.lineOfSightClear(client.world, player, solution);
         if (ok) {
-            beginClicking(client, /*skipVerify=*/false);
+            beginClicking(client);
         } else {
-            // Something moved into the way, or facing couldn't be satisfied — retry.
             abortTarget();
         }
     }
 
-    private void beginClicking(MinecraftClient client, boolean skipVerify) {
-        // Optional hesitation pause before committing.
+    private void beginClicking(MinecraftClient client) {
         long delay = 0L;
         if (StochasticEngine.INSTANCE.rollHesitation()) {
             delay = (long) StochasticEngine.INSTANCE.hesitationMs();
         }
         waitUntilMs = System.currentTimeMillis() + delay;
-        clickHoldTicks = 2; // hold the use key ~2 ticks
+        clickHoldTicks = 2;
         state = State.CLICKING;
     }
 
     private void tickClicking(MinecraftClient client) {
-        if (System.currentTimeMillis() < waitUntilMs) return; // hesitation
+        if (System.currentTimeMillis() < waitUntilMs) return;
 
         if (clickHoldTicks == 2) {
-            InputSimulator.setUse(client, true); // press (fires doItemUse next tick)
+            InputSimulator.setUse(client, true);
         }
         clickHoldTicks--;
         if (clickHoldTicks <= 0) {
-            InputSimulator.setUse(client, false); // release
+            InputSimulator.setUse(client, false);
             double factor = TPSMonitor.INSTANCE.getDelayFactor();
             waitUntilMs = System.currentTimeMillis()
                     + (long) StochasticEngine.INSTANCE.placementCooldownMs(factor);
@@ -213,11 +323,23 @@ public final class BuilderStateMachine {
     private void tickCooldown(MinecraftClient client, ClientPlayerEntity player) {
         if (System.currentTimeMillis() < waitUntilMs) return;
 
-        // Count it as placed if the real world now matches the schematic block.
+        boolean placed = false;
         if (target != null && client.world != null) {
             var now = client.world.getBlockState(target.pos());
-            if (!now.isAir() && now.getBlock() == target.state().getBlock()) {
+            placed = !now.isAir() && now.getBlock() == target.state().getBlock();
+        }
+        if (target != null) {
+            long key = target.pos().asLong();
+            if (placed) {
                 placedCount++;
+                placeFails.remove(key);
+            } else {
+                // Repeated placement failure → blacklist so we don't loop forever.
+                int fails = placeFails.merge(key, 1, Integer::sum);
+                if (fails >= 4) {
+                    blacklist(target.pos(), 30_000);
+                    placeFails.remove(key);
+                }
             }
         }
         InputSimulator.setSneak(client, false);
@@ -226,9 +348,26 @@ public final class BuilderStateMachine {
     }
 
     private void enterPausedLag(MinecraftClient client) {
-        InputSimulator.releaseAll(client);
-        HumanAimController.INSTANCE.cancel();
+        releaseAllInput(client);
         state = State.PAUSED_LAG;
+    }
+
+    // ---------------------------------------------------------------------
+    //  Blacklist
+    // ---------------------------------------------------------------------
+
+    private boolean blacklisted(BlockPos p) {
+        Long until = blacklistUntil.get(p.asLong());
+        if (until == null) return false;
+        if (System.currentTimeMillis() >= until) {
+            blacklistUntil.remove(p.asLong());
+            return false;
+        }
+        return true;
+    }
+
+    private void blacklist(BlockPos p, long ms) {
+        if (p != null) blacklistUntil.put(p.asLong(), System.currentTimeMillis() + ms);
     }
 
     // ---------------------------------------------------------------------
@@ -240,15 +379,17 @@ public final class BuilderStateMachine {
         sessionStartMs = System.currentTimeMillis();
         placedCount = 0;
         lastReportMs = 0L;
+        blacklistUntil.clear();
+        placeFails.clear();
         StochasticEngine.INSTANCE.onActivate();
         state = State.SCANNING;
     }
 
     private void shutdown(MinecraftClient client) {
-        InputSimulator.releaseAll(client);
-        HumanAimController.INSTANCE.cancel();
+        releaseAllInput(client);
         StochasticEngine.INSTANCE.onDeactivate();
         controlling = false;
+        navTarget = null;
         clearTarget();
         state = State.IDLE;
     }
@@ -256,15 +397,21 @@ public final class BuilderStateMachine {
     /** External reset (toggle off, disconnect). */
     public void reset() {
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client != null) {
-            InputSimulator.releaseAll(client);
-        }
-        HumanAimController.INSTANCE.cancel();
+        if (client != null) releaseAllInput(client);
         StochasticEngine.INSTANCE.onDeactivate();
         TPSMonitor.INSTANCE.reset();
         controlling = false;
+        navTarget = null;
+        blacklistUntil.clear();
+        placeFails.clear();
         clearTarget();
         state = State.IDLE;
+    }
+
+    private void releaseAllInput(MinecraftClient client) {
+        InputSimulator.releaseAll(client);
+        NavigationController.INSTANCE.stop(client);
+        HumanAimController.INSTANCE.cancel();
     }
 
     private void abortTarget() {
@@ -296,9 +443,8 @@ public final class BuilderStateMachine {
         double perMin = placedCount / (elapsedSec / 60.0);
         double secPer = elapsedSec / placedCount;
         String msg = String.format(
-                "§bHumanBuilder §7| placed §f%d §7| §f%.1f§7/min | §f%.2fs§7/block | TPS §f%.1f§7 | fatigue §f%.2fx",
-                placedCount, perMin, secPer, TPSMonitor.INSTANCE.getTps(),
-                StochasticEngine.INSTANCE.fatigueMultiplier());
+                "§bHumanBuilder §7| placed §f%d §7| §f%.1f§7/min | §f%.2fs§7/block | TPS §f%.1f§7 | %s",
+                placedCount, perMin, secPer, TPSMonitor.INSTANCE.getTps(), state);
         player.sendMessage(Text.literal(msg), true);
     }
 }

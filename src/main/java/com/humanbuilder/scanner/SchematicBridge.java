@@ -4,12 +4,15 @@ import com.humanbuilder.config.BuilderConfig;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import fi.dy.masa.litematica.world.WorldSchematic;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.enums.BedPart;
+import net.minecraft.block.enums.DoubleBlockHalf;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
+import net.minecraft.state.property.Properties;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
@@ -53,6 +56,7 @@ public final class SchematicBridge {
         int cz = (int) Math.floor(eye.z);
 
         var chunkManager = schem.getChunkManager();
+        BlockPos feet = player.getBlockPos();
         List<Target> out = new ArrayList<>();
         BlockPos.Mutable pos = new BlockPos.Mutable();
 
@@ -70,6 +74,17 @@ public final class SchematicBridge {
 
                     BlockState want = schem.getBlockState(pos);
                     if (want.isAir()) continue;
+
+                    // Don't place a block into the player's own body.
+                    if (pos.equals(feet) || pos.equals(feet.up())) continue;
+
+                    // Skip the auto-generated secondary half of double blocks
+                    // (door top, bed head, tall plant top) — placing the base
+                    // spawns both halves; targeting the top would double-place.
+                    if (want.contains(Properties.DOUBLE_BLOCK_HALF)
+                            && want.get(Properties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER) continue;
+                    if (want.contains(Properties.BED_PART)
+                            && want.get(Properties.BED_PART) == BedPart.HEAD) continue;
 
                     BlockState have = real.getBlockState(pos);
                     if (have == want) continue;                       // already correct
