@@ -244,7 +244,27 @@ public final class BuilderStateMachine {
             lastScanMs = now;
         }
 
-        // Best non-blacklisted target (list is lowest-Y first, then nearest).
+        Vec3d eye = player.getEyePos();
+
+        // Pass A — group building: place everything reachable from where we stand
+        // right now before walking anywhere. Drains the local cluster (faster,
+        // less back-and-forth). Bounded so it can't get expensive.
+        int checked = 0;
+        for (Target t : targetCache) {
+            if (checked++ >= 40) break;
+            if (blacklisted(t.pos())) continue;
+            PlacementSolution s = BlockPlacementMath.solve(client.world, player, t.pos(), t.state(), HAND);
+            if (s == null) continue;
+            if (BlockPlacementMath.reachable(client.world, player, s)
+                    && BlockPlacementMath.facingOkFrom(player, HAND, t.state(), s, eye)) {
+                idleReported = false;
+                beginBuild(t, s, now, false);
+                targetCache.remove(t);
+                return;
+            }
+        }
+
+        // Pass B — nothing reachable here; go to the nearest/lowest target.
         Target chosen = null;
         for (Target t : targetCache) {
             if (!blacklisted(t.pos())) { chosen = t; break; }
@@ -268,16 +288,10 @@ public final class BuilderStateMachine {
             return;
         }
 
-        boolean canBuildHere = BlockPlacementMath.reachable(client.world, player, sol)
-                && BlockPlacementMath.facingOkFrom(player, HAND, chosen.state(), sol, player.getEyePos());
-        if (canBuildHere) {
-            beginBuild(chosen, sol, now, false);
-            targetCache.remove(chosen);
-            return;
-        }
+        boolean overlaps = BlockPlacementMath.overlapsPlayer(player, sol);
 
-        // Not buildable from here — walk to it (even if far; partial paths make
-        // progress, and we re-plan on arrival).
+        // Walk to a spot from which we can build it (this is also how we "move
+        // away, then place" a block that is where we're standing).
         if (cfg.enableNavigation && startNavigation(client, player, chosen, sol)) {
             Scaffolder.INSTANCE.reset();
             scaffoldGoal = null;
@@ -287,12 +301,26 @@ public final class BuilderStateMachine {
             return;
         }
 
+        // The block is where we stand but there's no standing spot to path to —
+        // physically step aside to vacate it, then it becomes placeable.
+        if (overlaps) {
+            forceSidestep(client);
+            return;
+        }
+
         // Can't reach or path to it (usually too high) — build a staircase up.
         if (tryScaffold(client, player, chosen)) return;
 
         // Nothing we can do with it right now.
         blacklist(chosen.pos(), 15_000);
         targetCache.remove(chosen);
+    }
+
+    /** Physically back away for a moment (used to vacate a block we're standing in). */
+    private void forceSidestep(MinecraftClient client) {
+        unstickUntil = System.currentTimeMillis() + 500L;
+        unstickTicks = 0;
+        NavigationController.INSTANCE.stop(client);
     }
 
     private void beginBuild(Target t, PlacementSolution sol, long now, boolean scaffold) {

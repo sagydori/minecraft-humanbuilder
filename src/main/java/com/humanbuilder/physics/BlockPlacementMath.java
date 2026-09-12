@@ -214,14 +214,17 @@ public final class BlockPlacementMath {
      * if it is hit <em>before</em> reaching the intended point (grazing a
      * coplanar neighbour at the very end is fine).
      */
+    /** Does the target block space overlap the player's body (can't place into self)? */
+    public static boolean overlapsPlayer(ClientPlayerEntity player, PlacementSolution sol) {
+        BlockPos tp = sol.targetPos();
+        Box tb = new Box(tp.getX(), tp.getY(), tp.getZ(),
+                tp.getX() + 1, tp.getY() + 1, tp.getZ() + 1);
+        return player.getBoundingBox().intersects(tb);
+    }
+
     public static boolean reachable(World world, ClientPlayerEntity player, PlacementSolution sol) {
-        // Never place into the player's own body: if the target block space
-        // overlaps the player's bounding box, this isn't placeable from here.
-        BlockPos targetPos = sol.anchorPos().offset(sol.side());
-        Box targetBox = new Box(
-                targetPos.getX(), targetPos.getY(), targetPos.getZ(),
-                targetPos.getX() + 1, targetPos.getY() + 1, targetPos.getZ() + 1);
-        if (player.getBoundingBox().intersects(targetBox)) return false;
+        // Never place into the player's own body.
+        if (overlapsPlayer(player, sol)) return false;
 
         Vec3d eye = player.getEyePos();
         Vec3d aim = sol.hitVec();
