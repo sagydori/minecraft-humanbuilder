@@ -27,6 +27,8 @@ public class HumanBuilderClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        BuilderConfig.load();
+
         // Since 1.21.9 the keybind category is a KeyBinding.Category keyed by an
         // Identifier, not a translation-key string.
         KeyBinding.Category category = KeyBinding.Category.create(Identifier.of(MOD_ID, "main"));

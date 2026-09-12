@@ -73,10 +73,13 @@ public final class NavigationController {
 
         // Walk forward; jump for step-ups or obstacles.
         press(client.options.forwardKey, true);
-        press(client.options.sneakKey, false);
         boolean stepUp = dy > 0.5;
         boolean obstacle = obstacleAhead(client, player);
         press(client.options.jumpKey, stepUp || obstacle);
+
+        // Sneak at ledges so we don't walk off the build (unless we mean to drop).
+        boolean descending = dy < -0.5;
+        press(client.options.sneakKey, !descending && edgeAhead(client, player));
 
         // Stuck detection: barely moved while trying to walk.
         Vec3d pp = new Vec3d(player.getX(), player.getY(), player.getZ());
@@ -106,6 +109,16 @@ public final class NavigationController {
         boolean blocked = !client.world.getBlockState(front).getCollisionShape(client.world, front).isEmpty();
         boolean clearAbove = client.world.getBlockState(front.up()).getCollisionShape(client.world, front.up()).isEmpty();
         return blocked && clearAbove;
+    }
+
+    /** Would stepping forward drop off a ledge (no floor in front)? */
+    private boolean edgeAhead(MinecraftClient client, ClientPlayerEntity player) {
+        Direction facing = horizontalFromYaw(player.getYaw());
+        BlockPos front = player.getBlockPos().offset(facing);
+        boolean frontClear = client.world.getBlockState(front).getCollisionShape(client.world, front).isEmpty()
+                && client.world.getBlockState(front.up()).getCollisionShape(client.world, front.up()).isEmpty();
+        boolean floorInFront = !client.world.getBlockState(front.down()).getCollisionShape(client.world, front.down()).isEmpty();
+        return frontClear && !floorInFront;
     }
 
     /** Nearest cardinal direction for a yaw: S=0°, W=90°, N=180°, E=270°. */

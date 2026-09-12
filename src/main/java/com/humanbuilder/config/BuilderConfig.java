@@ -15,8 +15,8 @@ public final class BuilderConfig {
     private BuilderConfig() {}
 
     // --- General ---
-    /** Master enable. Toggled by the keybind. */
-    public boolean enabled = false;
+    /** Master enable. Toggled by the keybind. (Runtime only — not persisted.) */
+    public transient boolean enabled = false;
     /** Fallback scan radius around the player when no placement bounds are set. */
     public double scanRadius = 64.0;
     /** Max candidate targets collected per full scan (bottom-up). */
@@ -73,13 +73,51 @@ public final class BuilderConfig {
     /** Safety cap on scaffold blocks placed per activation. */
     public int maxScaffoldBlocks = 64;
 
-    // --- Schematic selection (set by the in-game menu) ---
+    // --- Schematic selection (set by the in-game menu; runtime only) ---
     /** If non-null, only build blocks inside this world-space box (the chosen placement). */
-    public net.minecraft.util.math.Box buildBounds = null;
+    public transient net.minecraft.util.math.Box buildBounds = null;
     /** Name of the chosen schematic placement, for display. */
-    public String selectedSchematic = null;
+    public transient String selectedSchematic = null;
 
     // --- Safety / debug ---
     /** If true, log the estimated remaining time to chat periodically. */
     public boolean reportEstimate = true;
+
+    // ---------------------------------------------------------------------
+    //  Persistence (config/humanbuilder.json) — transient fields are skipped.
+    // ---------------------------------------------------------------------
+
+    private static java.nio.file.Path file() {
+        return net.fabricmc.loader.api.FabricLoader.getInstance()
+                .getConfigDir().resolve("humanbuilder.json");
+    }
+
+    public static void load() {
+        try {
+            java.nio.file.Path f = file();
+            if (!java.nio.file.Files.exists(f)) { save(); return; }
+            BuilderConfig loaded = new com.google.gson.Gson()
+                    .fromJson(java.nio.file.Files.readString(f), BuilderConfig.class);
+            if (loaded == null) return;
+            for (java.lang.reflect.Field field : BuilderConfig.class.getDeclaredFields()) {
+                int m = field.getModifiers();
+                if (java.lang.reflect.Modifier.isStatic(m)
+                        || java.lang.reflect.Modifier.isTransient(m)
+                        || java.lang.reflect.Modifier.isFinal(m)) continue;
+                field.setAccessible(true);
+                field.set(INSTANCE, field.get(loaded));
+            }
+        } catch (Throwable t) {
+            System.err.println("[HumanBuilder] Failed to load config: " + t);
+        }
+    }
+
+    public static void save() {
+        try {
+            String json = new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(INSTANCE);
+            java.nio.file.Files.writeString(file(), json);
+        } catch (Throwable t) {
+            System.err.println("[HumanBuilder] Failed to save config: " + t);
+        }
+    }
 }

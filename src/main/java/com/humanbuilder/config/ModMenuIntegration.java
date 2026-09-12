@@ -81,6 +81,7 @@ public class ModMenuIntegration implements ModMenuApi {
         nav.addEntry(eb.startIntField(Text.literal("Max scaffold blocks"), cfg.maxScaffoldBlocks)
                 .setMin(0).setMax(512).setSaveConsumer(v -> cfg.maxScaffoldBlocks = v).build());
 
+        builder.setSavingRunnable(BuilderConfig::save);
         return builder.build();
     }
 }

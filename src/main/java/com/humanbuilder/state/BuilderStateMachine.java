@@ -1,5 +1,6 @@
 package com.humanbuilder.state;
 
+import com.humanbuilder.HumanBuilderClient;
 import com.humanbuilder.aim.HumanAimController;
 import com.humanbuilder.config.BuilderConfig;
 import com.humanbuilder.inventory.InventoryManager;
@@ -80,6 +81,14 @@ public final class BuilderStateMachine {
     // Per-stage diagnostic counters (surfaced in the status line while placed==0).
     private int diagSolveNull, diagFetchFail, diagVerifyFail, diagPlaceTry, diagPlaceFail;
 
+    // Safety / watchdog.
+    private int errorCount;
+    private long lastProgressMs;
+    private long unstickUntil;
+    private int unstickTicks;
+    private long lastLowHealthMsg;
+    private boolean idleReported;
+
     // --- Build-time estimation ---
     private long sessionStartMs = 0L;
     private int placedCount = 0;
@@ -100,8 +109,27 @@ public final class BuilderStateMachine {
     // ---------------------------------------------------------------------
 
     public void onClientTick(MinecraftClient client) {
+        // Never let a bug crash the game's client tick: contain and recover.
+        try {
+            tickInternal(client);
+        } catch (Throwable t) {
+            errorCount++;
+            if (errorCount <= 3) {
+                HumanBuilderClient.LOGGER.error("HumanBuilder tick error (recovering)", t);
+            }
+            try { releaseAllInput(client); } catch (Throwable ignored) {}
+            clearTarget();
+            state = State.SCANNING;
+            if (errorCount > 30) { // persistent failure — stop rather than spam
+                BuilderConfig.INSTANCE.enabled = false;
+                controlling = false;
+                message(client, "§cHumanBuilder disabled after repeated errors (see log)");
+            }
+        }
+    }
+
+    private void tickInternal(MinecraftClient client) {
         BuilderConfig cfg = BuilderConfig.INSTANCE;
-        TPSMonitor.INSTANCE.update(client.world);
 
         if (!cfg.enabled) {
             if (controlling) shutdown(client);
@@ -136,13 +164,50 @@ public final class BuilderStateMachine {
 
         if (!controlling) startup();
 
-        // Global TPS gate.
+        long now = System.currentTimeMillis();
+
+        // Survival safety: pause (don't die) while health is low; resume when healed.
+        if (!player.getAbilities().creativeMode && player.getHealth() <= 6.0f) {
+            releaseAllInput(client);
+            if (now - lastLowHealthMsg > 5000L) {
+                message(client, "§eHumanBuilder paused — low health");
+                lastLowHealthMsg = now;
+            }
+            return;
+        }
+
+        // Brief physical un-stick nudge (from the watchdog): back up and hop.
+        if (now < unstickUntil) {
+            NavigationController.INSTANCE.tickRecovery(client, unstickTicks++);
+            return;
+        }
+
+        TPSMonitor.INSTANCE.update(client.world);
         double tps = TPSMonitor.INSTANCE.getTps();
         if (tps < cfg.pauseBelowTps) {
             enterPausedLag(client);
             return;
         } else if (state == State.PAUSED_LAG) {
             state = State.SCANNING;
+        }
+
+        // Watchdog: if there is work but no placement progress for a while, we are
+        // wedged — clear skip-lists, drop caches, and physically nudge to recover.
+        if (now - lastProgressMs > 25_000L
+                && SchematicBridge.INSTANCE.getLastStats().candidates > 0) {
+            blacklistUntil.clear();
+            placeFails.clear();
+            targetCache.clear();
+            Scaffolder.INSTANCE.reset();
+            scaffoldGoal = null;
+            scaffoldAttempts = 0;
+            lastProgressMs = now;
+            unstickUntil = now + 700L;
+            unstickTicks = 0;
+            NavigationController.INSTANCE.stop(client);
+            HumanAimController.INSTANCE.cancel();
+            state = State.SCANNING;
+            return;
         }
 
         switch (state) {
@@ -184,7 +249,15 @@ public final class BuilderStateMachine {
         for (Target t : targetCache) {
             if (!blacklisted(t.pos())) { chosen = t; break; }
         }
-        if (chosen == null) return; // nothing to do right now (done, or all far/blacklisted)
+        if (chosen == null) {
+            if (!idleReported) {
+                message(client, "§eHumanBuilder idle — nothing to build ("
+                        + SchematicBridge.INSTANCE.getLastStats().summary() + ")");
+                idleReported = true;
+            }
+            return; // nothing to do (done, waiting on supports, or all far/blacklisted)
+        }
+        idleReported = false;
 
         PlacementSolution sol = BlockPlacementMath.solve(
                 client.world, player, chosen.pos(), chosen.state(), HAND);
@@ -308,6 +381,7 @@ public final class BuilderStateMachine {
 
     private void tickArrived(MinecraftClient client, ClientPlayerEntity player) {
         NavigationController.INSTANCE.stop(client);
+        lastProgressMs = System.currentTimeMillis(); // movement counts as progress
         BlockPos nt = navTarget;
         navTarget = null;
         recoveryAttempts = 0;
@@ -481,6 +555,7 @@ public final class BuilderStateMachine {
             var now = client.world.getBlockState(target.pos());
             placed = !now.isAir() && now.getBlock() == target.state().getBlock();
         }
+        if (placed) { lastProgressMs = System.currentTimeMillis(); errorCount = 0; } // progress
         if (buildingScaffold) {
             // Scaffold block: track separately; a failure aborts the staircase so
             // we don't loop, and it isn't counted as schematic progress.
@@ -546,6 +621,9 @@ public final class BuilderStateMachine {
         scaffoldGoal = null;
         scaffoldAttempts = 0;
         diagSolveNull = diagFetchFail = diagVerifyFail = diagPlaceTry = diagPlaceFail = 0;
+        errorCount = 0;
+        lastProgressMs = System.currentTimeMillis();
+        unstickUntil = 0L;
         StochasticEngine.INSTANCE.onActivate();
         state = State.SCANNING;
     }
