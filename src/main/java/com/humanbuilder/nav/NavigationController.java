@@ -79,7 +79,13 @@ public final class NavigationController {
 
         // Sneak at ledges so we don't walk off the build (unless we mean to drop).
         boolean descending = dy < -0.5;
-        press(client.options.sneakKey, !descending && edgeAhead(client, player));
+        boolean edge = !descending && edgeAhead(client, player);
+        press(client.options.sneakKey, edge);
+
+        // Sprint only on long, clear, flat straightaways — never near a waypoint,
+        // an edge, an obstacle or a step-up (keeps it safe and accurate).
+        boolean canSprint = horiz > 3.0 && !edge && !obstacle && !stepUp && Math.abs(dy) < 0.6;
+        press(client.options.sprintKey, canSprint);
 
         // Stuck detection: barely moved while trying to walk.
         Vec3d pp = new Vec3d(player.getX(), player.getY(), player.getZ());
@@ -139,6 +145,7 @@ public final class NavigationController {
     /** One tick of stuck-recovery: back up and hop. */
     public void tickRecovery(MinecraftClient client, int recoveryTick) {
         press(client.options.forwardKey, false);
+        press(client.options.sprintKey, false);
         press(client.options.backKey, true);
         press(client.options.jumpKey, recoveryTick % 8 < 3);
     }
@@ -150,6 +157,7 @@ public final class NavigationController {
         press(client.options.rightKey, false);
         press(client.options.jumpKey, false);
         press(client.options.sneakKey, false);
+        press(client.options.sprintKey, false);
         stationaryTicks = 0;
     }
 

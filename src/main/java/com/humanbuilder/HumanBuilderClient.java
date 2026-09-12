@@ -25,6 +25,7 @@ public class HumanBuilderClient implements ClientModInitializer {
 
     private KeyBinding toggleKey;
     private KeyBinding menuKey;
+    private KeyBinding pauseKey;
 
     @Override
     public void onInitializeClient() {
@@ -45,6 +46,12 @@ public class HumanBuilderClient implements ClientModInitializer {
                 GLFW.GLFW_KEY_N,
                 category
         ));
+        pauseKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.humanbuilder.pause",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_P,
+                category
+        ));
 
         // The state machine itself runs from MinecraftClientMixin#tick (TAIL),
         // as mandated. Here we only watch the keys and reset on disconnect.
@@ -59,6 +66,12 @@ public class HumanBuilderClient implements ClientModInitializer {
                 BuilderConfig.INSTANCE.enabled = now;
                 BuilderStateMachine.INSTANCE.reset();
                 message(client, now ? "§aHumanBuilder enabled" : "§cHumanBuilder disabled");
+            }
+            while (pauseKey.wasPressed()) {
+                if (BuilderConfig.INSTANCE.enabled) {
+                    boolean p = BuilderStateMachine.INSTANCE.togglePause();
+                    message(client, p ? "§eHumanBuilder paused" : "§aHumanBuilder resumed");
+                }
             }
         });
 

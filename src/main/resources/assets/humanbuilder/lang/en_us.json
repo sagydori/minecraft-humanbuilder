@@ -1,6 +1,7 @@
 {
   "key.humanbuilder.toggle": "Toggle HumanBuilder",
   "key.humanbuilder.menu": "Open HumanBuilder menu",
+  "key.humanbuilder.pause": "Pause/Resume HumanBuilder",
   "key.humanbuilder.main": "HumanBuilder",
   "category.humanbuilder": "HumanBuilder"
 }

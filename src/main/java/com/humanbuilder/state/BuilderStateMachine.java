@@ -88,6 +88,7 @@ public final class BuilderStateMachine {
     private int unstickTicks;
     private long lastLowHealthMsg;
     private boolean idleReported;
+    private boolean paused;
 
     // Whole-build ETA.
     private int remainingEstimate = -1;
@@ -112,6 +113,27 @@ public final class BuilderStateMachine {
         return controlling && BuilderConfig.INSTANCE.enabled;
     }
 
+    public boolean isPaused() {
+        return paused;
+    }
+
+    /** Toggle a soft pause (keeps state; releases input). Returns the new state. */
+    public boolean togglePause() {
+        paused = !paused;
+        if (paused) {
+            MinecraftClient c = MinecraftClient.getInstance();
+            if (c != null) releaseAllInput(c);
+        }
+        return paused;
+    }
+
+    /** Session build progress [0..1], or -1 if unknown. */
+    public double progressFraction() {
+        if (remainingEstimate < 0) return -1;
+        int total = placedCount + remainingEstimate;
+        return total > 0 ? (double) placedCount / total : 1.0;
+    }
+
     /** Lines for the on-screen HUD (state, throughput, remaining, ETA). */
     public java.util.List<String> statusLines() {
         java.util.List<String> out = new java.util.ArrayList<>(5);
@@ -120,7 +142,7 @@ public final class BuilderStateMachine {
         double perMin = placedCount / (elapsedSec / 60.0);
         double secPer = placedCount > 0 ? elapsedSec / placedCount : 0.0;
 
-        out.add("§b§lHumanBuilder §r§7" + state);
+        out.add("§b§lHumanBuilder §r" + (paused ? "§e[PAUSED] §7" : "§7") + state);
         out.add("§7placed §f" + placedCount + " §7(§f" + String.format("%.1f", perMin) + "§7/min)");
 
         String rem = remainingEstimate < 0 ? "…"
@@ -203,6 +225,12 @@ public final class BuilderStateMachine {
         }
 
         if (!controlling) startup();
+
+        // Soft pause: hold everything but keep state so we can resume.
+        if (paused) {
+            releaseAllInput(client);
+            return;
+        }
 
         long now = System.currentTimeMillis();
 
@@ -709,6 +737,7 @@ public final class BuilderStateMachine {
         unstickUntil = 0L;
         remainingEstimate = -1;
         lastCountMs = 0L;
+        paused = false;
         StochasticEngine.INSTANCE.onActivate();
         state = State.SCANNING;
     }
@@ -737,6 +766,7 @@ public final class BuilderStateMachine {
         Scaffolder.INSTANCE.reset();
         scaffoldGoal = null;
         scaffoldAttempts = 0;
+        paused = false;
         clearTarget();
         state = State.IDLE;
     }

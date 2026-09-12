@@ -35,5 +35,15 @@ public final class HudOverlay {
             ctx.drawTextWithShadow(mc.textRenderer, Text.literal(line), x, y, 0xFFFFFFFF);
             y += 11;
         }
+
+        // Progress bar.
+        double frac = BuilderStateMachine.INSTANCE.progressFraction();
+        if (frac >= 0) {
+            int bw = 150, bh = 5, by = y + 2;
+            ctx.fill(x - 1, by - 1, x + bw + 1, by + bh + 1, 0xC0000000); // border/backdrop
+            ctx.fill(x, by, x + bw, by + bh, 0xFF303030);                 // track
+            int fill = (int) Math.round(bw * Math.max(0.0, Math.min(1.0, frac)));
+            ctx.fill(x, by, x + fill, by + bh, 0xFF5DD85D);               // progress (green)
+        }
     }
 }
