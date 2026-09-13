@@ -39,6 +39,14 @@ public class ModMenuIntegration implements ModMenuApi {
         general.addEntry(eb.startBooleanToggle(Text.literal("Action-bar status (if HUD off)"), cfg.reportEstimate)
                 .setSaveConsumer(v -> cfg.reportEstimate = v).build());
 
+        ConfigCategory order = builder.getOrCreateCategory(Text.literal("Build order"));
+        order.addEntry(eb.startBooleanToggle(Text.literal("Serpentine (lawnmower) sweep"), cfg.serpentineSweep)
+                .setTooltip(Text.literal("Cover each layer row-by-row instead of hopping to the nearest block — less walking and backtracking."))
+                .setSaveConsumer(v -> cfg.serpentineSweep = v).build());
+        order.addEntry(eb.startBooleanToggle(Text.literal("Structural blocks first"), cfg.structuralFirst)
+                .setTooltip(Text.literal("Place the solid mass before slabs/stairs/torches/rails so supports exist first."))
+                .setSaveConsumer(v -> cfg.structuralFirst = v).build());
+
         ConfigCategory aim = builder.getOrCreateCategory(Text.literal("Aim realism"));
         aim.addEntry(eb.startBooleanToggle(Text.literal("Micro-tremor"), cfg.enableTremor)
                 .setSaveConsumer(v -> cfg.enableTremor = v).build());

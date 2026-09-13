@@ -228,6 +228,11 @@ public final class SchematicBridge {
     //  Region helpers
     // ---------------------------------------------------------------------
 
+    /** Public build region {minX,minY,minZ,maxX,maxY,maxZ} (bounds/placements/fallback), or null. */
+    public int[] buildRegion(MinecraftClient client) {
+        return client == null || client.player == null ? null : region(client.player);
+    }
+
     private static int[] region(ClientPlayerEntity player) {
         Box b = BuilderConfig.INSTANCE.buildBounds;
         if (b != null) {

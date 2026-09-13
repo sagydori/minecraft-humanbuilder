@@ -24,6 +24,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.HashMap;
@@ -64,6 +65,15 @@ public final class BuilderStateMachine {
     private final java.util.List<Target> targetCache = new java.util.ArrayList<>();
     private long lastScanMs = 0L;
     private int currentLayerY = Integer.MIN_VALUE;
+    /** Last block successfully placed on the current layer — anchors a connected sweep. */
+    private BlockPos lastPlacedPos;
+
+    // Boustrophedon (serpentine) sweep state, recomputed when the layer changes.
+    private boolean sweepRunAxisX;                       // rows run along X (indexed by Z)?
+    private boolean sweepFlipRow, sweepFlipRun;          // start the sweep near the player
+    private int sweepMinX, sweepMinZ, sweepMaxX, sweepMaxZ;
+    /** Sweep-order key of the last placed block; the next pick advances past it. */
+    private long lastPlacedKey = Long.MIN_VALUE;
 
     // Scaffolding.
     private boolean buildingScaffold;
@@ -346,32 +356,86 @@ public final class BuilderStateMachine {
             }
             return;
         }
-        currentLayerY = layerY;
+        if (layerY != currentLayerY) {
+            currentLayerY = layerY;
+            lastPlacedPos = null;                 // new layer → sweep restarts from the player
+            lastPlacedKey = Long.MIN_VALUE;
+            if (cfg.serpentineSweep) configureSweep(client, player);
+        }
         idleReported = false;
 
+        // Structural-first: while any solid full-cube block remains on this layer,
+        // restrict selection to those (walls before slabs/stairs/torches/rails),
+        // so a block's support always exists before its detail — fewer failed
+        // placements and no revisiting. Flips to details once the mass is done.
+        boolean structuralPhase = cfg.structuralFirst && hasStructuralRemaining(layerY);
+
         // Pass A — group building: place everything reachable on THIS layer from
-        // where we stand, before walking anywhere.
+        // where we stand, before walking. Reachable blocks are chosen in sweep
+        // order (the next block along the boustrophedon path) so consecutive
+        // placements form a contiguous run, minimising aim travel; without the
+        // sweep we fall back to nearest-to-last-placed.
         int checked = 0;
         boolean anyLayerInCache = false;
+        Vec3d anchor = anchorPoint(player, layerY);
+        Target bestReach = null;
+        PlacementSolution bestReachSol = null;
+        double bestReachD = Double.MAX_VALUE;
+        long bestReachKey = Long.MAX_VALUE;
+        boolean bestReachFwd = false;
         for (Target t : targetCache) {
             if (t.pos().getY() != layerY) continue;
             anyLayerInCache = true;
             if (blacklisted(t.pos())) continue;
+            if (structuralPhase && !isStructural(client, t)) continue;
             if (checked++ >= 60) break;
             PlacementSolution s = BlockPlacementMath.solve(client.world, player, t.pos(), t.state(), HAND);
             if (s == null) continue;
             if (BlockPlacementMath.reachable(client.world, player, s)
                     && BlockPlacementMath.facingOkFrom(player, HAND, t.state(), s, eye)) {
-                beginBuild(t, s, now, false);
-                targetCache.remove(t);
-                return;
+                if (cfg.serpentineSweep) {
+                    long k = sweepKey(t.pos());
+                    boolean fwd = k > lastPlacedKey;
+                    if (isBetterInSweep(fwd, k, bestReach != null, bestReachFwd, bestReachKey)) {
+                        bestReachFwd = fwd; bestReachKey = k; bestReach = t; bestReachSol = s;
+                    }
+                } else {
+                    double d = t.pos().getSquaredDistance(anchor.x, anchor.y, anchor.z);
+                    if (d < bestReachD) { bestReachD = d; bestReach = t; bestReachSol = s; }
+                }
             }
         }
+        if (bestReach != null) {
+            beginBuild(bestReach, bestReachSol, now, false);
+            targetCache.remove(bestReach);
+            return;
+        }
 
-        // Pass B — navigate/scaffold to the nearest block on this layer.
+        // Pass B — nothing in reach: walk to the next block along the sweep. In
+        // serpentine mode that's the next boustrophedon cell after the last one we
+        // placed (finish the row, then step to the next), which eliminates the
+        // back-and-forth of a pure nearest-block hop. Without the sweep we fall
+        // back to a greedy nearest-neighbour tour from the player's CURRENT spot,
+        // biased toward blocks already touching built structure (grow a frontier).
         Target chosen = null;
+        double bestD = Double.MAX_VALUE;
+        long bestKey = Long.MAX_VALUE;
+        boolean bestFwd = false;
+        Vec3d from = new Vec3d(player.getX(), player.getY(), player.getZ());
         for (Target t : targetCache) {
-            if (t.pos().getY() == layerY && !blacklisted(t.pos())) { chosen = t; break; }
+            if (t.pos().getY() != layerY || blacklisted(t.pos())) continue;
+            if (structuralPhase && !isStructural(client, t)) continue;
+            if (cfg.serpentineSweep) {
+                long k = sweepKey(t.pos());
+                boolean fwd = k > lastPlacedKey;
+                if (isBetterInSweep(fwd, k, chosen != null, bestFwd, bestKey)) {
+                    bestFwd = fwd; bestKey = k; chosen = t;
+                }
+            } else {
+                double d = t.pos().getSquaredDistance(from.x, from.y, from.z);
+                if (touchesBuilt(client, t.pos())) d *= 0.5;
+                if (d < bestD) { bestD = d; chosen = t; }
+            }
         }
         if (chosen != null) {
             PlacementSolution sol = BlockPlacementMath.solve(
@@ -415,6 +479,104 @@ public final class BuilderStateMachine {
             message(client, "§eHumanBuilder: skipped " + skipped + " unbuildable block(s) at Y=" + layerY);
         }
         currentLayerY = Integer.MIN_VALUE;
+    }
+
+    /**
+     * The point a connected sweep grows from: the centre of the last block we
+     * placed on this layer, or the player's position when the layer just started.
+     */
+    private Vec3d anchorPoint(ClientPlayerEntity player, int layerY) {
+        if (lastPlacedPos != null && lastPlacedPos.getY() == layerY) {
+            return new Vec3d(lastPlacedPos.getX() + 0.5, lastPlacedPos.getY() + 0.5,
+                    lastPlacedPos.getZ() + 0.5);
+        }
+        return new Vec3d(player.getX(), player.getY(), player.getZ());
+    }
+
+    /** True if any horizontal neighbour is already a solid (built) block. */
+    private static boolean touchesBuilt(MinecraftClient client, BlockPos p) {
+        if (client.world == null) return false;
+        for (Direction d : Direction.Type.HORIZONTAL) {
+            BlockState ns = client.world.getBlockState(p.offset(d));
+            if (!ns.isAir() && !ns.isReplaceable()) return true;
+        }
+        return false;
+    }
+
+    // ---------------------------------------------------------------------
+    //  Boustrophedon (serpentine) sweep ordering
+    // ---------------------------------------------------------------------
+
+    /**
+     * Orient this layer's lawnmower sweep: run along the longer horizontal axis
+     * (fewer rows → fewer turns) and start from the corner nearest the player, so
+     * the sweep begins where they already stand rather than a fixed corner.
+     */
+    private void configureSweep(MinecraftClient client, ClientPlayerEntity player) {
+        int[] r = SchematicBridge.INSTANCE.buildRegion(client);
+        if (r != null) {
+            sweepMinX = r[0]; sweepMinZ = r[2]; sweepMaxX = r[3]; sweepMaxZ = r[5];
+        } else {
+            sweepMinX = sweepMaxX = (int) Math.floor(player.getX());
+            sweepMinZ = sweepMaxZ = (int) Math.floor(player.getZ());
+        }
+        double px = player.getX(), pz = player.getZ();
+        sweepRunAxisX = (sweepMaxX - sweepMinX) >= (sweepMaxZ - sweepMinZ);
+        if (sweepRunAxisX) {
+            sweepFlipRow = Math.abs(pz - sweepMaxZ) < Math.abs(pz - sweepMinZ);
+            sweepFlipRun = Math.abs(px - sweepMaxX) < Math.abs(px - sweepMinX);
+        } else {
+            sweepFlipRow = Math.abs(px - sweepMaxX) < Math.abs(px - sweepMinX);
+            sweepFlipRun = Math.abs(pz - sweepMaxZ) < Math.abs(pz - sweepMinZ);
+        }
+    }
+
+    /** Position of {@code p} along the serpentine path: earlier key = built sooner. */
+    private long sweepKey(BlockPos p) {
+        int row, run, width;
+        if (sweepRunAxisX) {
+            row = sweepFlipRow ? (sweepMaxZ - p.getZ()) : (p.getZ() - sweepMinZ);
+            int x = sweepFlipRun ? (sweepMaxX - p.getX()) : (p.getX() - sweepMinX);
+            width = sweepMaxX - sweepMinX + 1;
+            run = (row & 1) == 0 ? x : (width - 1 - x); // reverse direction every other row
+        } else {
+            row = sweepFlipRow ? (sweepMaxX - p.getX()) : (p.getX() - sweepMinX);
+            int z = sweepFlipRun ? (sweepMaxZ - p.getZ()) : (p.getZ() - sweepMinZ);
+            width = sweepMaxZ - sweepMinZ + 1;
+            run = (row & 1) == 0 ? z : (width - 1 - z);
+        }
+        return (long) row * (width + 1L) + run;
+    }
+
+    /**
+     * Sweep comparator: a candidate strictly ahead of the last placement (key >
+     * lastPlacedKey) always beats one that isn't; within the same "ahead" class
+     * the smaller key wins. So we walk forward through the path and only wrap to
+     * the earliest remaining block once nothing ahead is left.
+     */
+    private static boolean isBetterInSweep(boolean fwd, long key,
+                                           boolean haveBest, boolean bestFwd, long bestKey) {
+        if (!haveBest) return true;
+        if (fwd != bestFwd) return fwd;
+        return key < bestKey;
+    }
+
+    /** Solid full cube → structural mass; slabs/stairs/fences/attachables are not. */
+    private static boolean isStructural(MinecraftClient client, Target t) {
+        try {
+            return t.state().isFullCube(client.world, t.pos());
+        } catch (Throwable ignore) {
+            return true; // if unsure, treat as structural (build it early)
+        }
+    }
+
+    /** True while the current layer still has any buildable structural candidate. */
+    private boolean hasStructuralRemaining(int layerY) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        for (Target t : targetCache) {
+            if (t.pos().getY() == layerY && isStructural(client, t)) return true;
+        }
+        return false;
     }
 
     /** Count a failure for a block; permanently skip it after repeated failures. */
@@ -716,6 +878,8 @@ public final class BuilderStateMachine {
             if (placed) {
                 placedCount++;
                 placeFails.remove(key);
+                lastPlacedPos = target.pos(); // anchor the next placement's sweep here
+                if (target.pos().getY() == currentLayerY) lastPlacedKey = sweepKey(target.pos());
             } else {
                 diagPlaceFail++;
                 noteFailure(target.pos()); // blacklist, then permanently skip after repeats
@@ -763,6 +927,8 @@ public final class BuilderStateMachine {
         targetCache.clear();
         lastScanMs = 0L;
         currentLayerY = Integer.MIN_VALUE;
+        lastPlacedPos = null;
+        lastPlacedKey = Long.MIN_VALUE;
         SchematicBridge.INSTANCE.clearSkips();
         Scaffolder.INSTANCE.reset();
         scaffoldGoal = null;
@@ -800,6 +966,8 @@ public final class BuilderStateMachine {
         targetCache.clear();
         lastScanMs = 0L;
         currentLayerY = Integer.MIN_VALUE;
+        lastPlacedPos = null;
+        lastPlacedKey = Long.MIN_VALUE;
         SchematicBridge.INSTANCE.clearSkips();
         Scaffolder.INSTANCE.reset();
         scaffoldGoal = null;

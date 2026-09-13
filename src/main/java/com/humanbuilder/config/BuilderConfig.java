@@ -23,6 +23,16 @@ public final class BuilderConfig {
     public int maxCandidates = 128;
     /** Safety cap on blocks examined per full scan. */
     public int maxScanIterations = 400_000;
+
+    // --- Placement ordering ---
+    /** Cover each layer in a boustrophedon (serpentine "lawnmower") sweep instead
+     *  of a greedy nearest-block hop — minimises walking, turns and backtracking.
+     *  The optimal known pattern for covering a 2D grid; also looks deliberate. */
+    public boolean serpentineSweep = true;
+    /** Within a layer, finish the solid full-cube mass before slabs/stairs/fences
+     *  and true attachables (torches, rails, carpets) — supports always exist
+     *  first, exactly how a person rough-builds then details. */
+    public boolean structuralFirst = true;
     /** Swallow real mouse input while the bot is active. */
     public boolean blockUserInput = true;
 
