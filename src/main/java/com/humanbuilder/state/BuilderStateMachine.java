@@ -662,20 +662,39 @@ public final class BuilderStateMachine {
     }
 
     /**
-     * Walk to a coverage-maximising vantage (reaches the most remaining layer
-     * blocks) rather than to one block's neighbour, so a whole cluster is placed
-     * per stop. {@code navTarget} stays the sweep block so arrival re-evaluation
-     * and blacklisting still work. Returns false to fall back to per-target nav.
+     * Baritone-style destination planning. Rather than greedily walking to one
+     * block's neighbour, it builds the GoalComposite — every standable cell from
+     * which some remaining layer block is placeable — and A*'s to the nearest of
+     * them by real movement cost, preferring productive vantages (reach ≥ 2
+     * blocks) so a whole cluster is placed per stop. The block actually built is
+     * emergent: whatever is placeable once we arrive. Falls back to a single
+     * coverage vantage, then to per-target navigation. {@code navTarget} stays the
+     * sweep block so arrival re-evaluation and blacklisting still work.
      */
     private boolean startCoverageNavigation(MinecraftClient client, ClientPlayerEntity player,
                                             Target chosen, java.util.List<BlockPos> layerPositions) {
         if (layerPositions.size() < 2) return false; // no cluster to batch — use per-target nav
         double reach = player.getBlockInteractionRange() - 0.3;
         BlockPos feet = player.getBlockPos();
-        BlockPos stand = Pathfinder.findCoverageStand(client.world, layerPositions, feet, reach);
-        if (stand == null || stand.equals(feet)) return false;
-        List<BlockPos> path = Pathfinder.findPath(client.world, feet, stand);
-        if (path.isEmpty()) return false;
+
+        // Heuristic focus = the remaining block nearest the player.
+        layerPositions.sort(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(feet)));
+        BlockPos focus = layerPositions.get(0);
+
+        // Prefer the nearest *productive* vantage; fall back to any placeable cell.
+        java.util.Set<Long> rich = Pathfinder.placeableStands(client.world, layerPositions, feet, reach, 2);
+        List<BlockPos> path = Pathfinder.pathToNearestStand(client.world, feet, rich, focus);
+        if (path.isEmpty()) {
+            java.util.Set<Long> any = Pathfinder.placeableStands(client.world, layerPositions, feet, reach, 1);
+            path = Pathfinder.pathToNearestStand(client.world, feet, any, focus);
+        }
+        if (path.isEmpty()) {
+            // Fallback: a single high-coverage vantage via a straight path.
+            BlockPos stand = Pathfinder.findCoverageStand(client.world, layerPositions, feet, reach);
+            if (stand == null || stand.equals(feet)) return false;
+            path = Pathfinder.findPath(client.world, feet, stand);
+            if (path.isEmpty()) return false;
+        }
         NavigationController.INSTANCE.setPath(path);
         Scaffolder.INSTANCE.reset();
         scaffoldGoal = null;

@@ -313,6 +313,98 @@ public final class Pathfinder {
         return best;
     }
 
+    /**
+     * Baritone-style GoalComposite: every standable feet cell from which at least
+     * {@code minCoverage} of {@code targets} are placeable (within {@code reach}
+     * and in line of sight), returned as packed longs, excluding {@code exclude}
+     * (the cell we already stand on). Facing/overlap are validated later by the
+     * placement solver — this is the destination-goal set the path search aims at.
+     * Bounded work (targets capped) so it is cheap enough to run per walk leg.
+     */
+    public static Set<Long> placeableStands(World world, List<BlockPos> targets,
+                                            BlockPos exclude, double reach, int minCoverage) {
+        Map<Long, Integer> cover = new HashMap<>();
+        Map<Long, Boolean> standCache = new HashMap<>();
+        int r = Math.max(1, (int) Math.floor(reach));
+        double reachSq = (reach - 0.1) * (reach - 0.1);
+        int cap = Math.min(targets.size(), 48);
+        long excludeKey = exclude.asLong();
+
+        for (int i = 0; i < cap; i++) {
+            BlockPos t = targets.get(i);
+            Vec3d tc = Vec3d.ofCenter(t);
+            for (int dx = -r; dx <= r; dx++)
+                for (int dz = -r; dz <= r; dz++)
+                    for (int dy = -1; dy <= 1; dy++) {
+                        BlockPos c = t.add(dx, dy, dz);
+                        long key = c.asLong();
+                        if (key == excludeKey) continue;
+                        Vec3d eye = Vec3d.ofCenter(c).add(0, EYE_HEIGHT - 0.5, 0);
+                        if (eye.squaredDistanceTo(tc) > reachSq) continue;
+                        Boolean ok = standCache.get(key);
+                        if (ok == null) { ok = standable(world, c); standCache.put(key, ok); }
+                        if (!ok) continue;
+                        if (!lineOfSight(world, eye, tc, t)) continue;
+                        cover.merge(key, 1, Integer::sum);
+                    }
+        }
+        Set<Long> out = new HashSet<>();
+        for (Map.Entry<Long, Integer> e : cover.entrySet()) {
+            if (e.getValue() >= minCoverage) out.add(e.getKey());
+        }
+        return out;
+    }
+
+    /**
+     * A* to the nearest feet cell in {@code goals} (a GoalComposite) by real
+     * movement cost, so "where it goes" is the cheapest-to-reach position from
+     * which it can build — not a greedy euclidean pick. {@code heuristicTarget}
+     * (typically the nearest remaining block) guides the search. Returns the
+     * waypoints, or an empty list if already there / unreachable.
+     */
+    public static List<BlockPos> pathToNearestStand(World world, BlockPos start,
+                                                    Set<Long> goals, BlockPos heuristicTarget) {
+        if (goals == null || goals.isEmpty() || goals.contains(start.asLong())) return List.of();
+        BuilderConfig cfg = BuilderConfig.INSTANCE;
+
+        PriorityQueue<Node> open = new PriorityQueue<>(Comparator.comparingDouble(n -> n.f));
+        Map<Long, Node> all = new HashMap<>();
+        Set<Long> closed = new HashSet<>();
+
+        Node s = new Node(start);
+        s.g = 0;
+        s.f = heuristic(start, heuristicTarget);
+        open.add(s);
+        all.put(start.asLong(), s);
+
+        int iterations = 0;
+        while (!open.isEmpty()) {
+            if (++iterations > cfg.maxPathIterations) break;
+            Node cur = open.poll();
+            if (closed.contains(cur.pos.asLong())) continue;
+            closed.add(cur.pos.asLong());
+
+            if (goals.contains(cur.pos.asLong())) return reconstruct(cur);
+
+            for (Move m : neighbors(world, cur.pos)) {
+                if (closed.contains(m.pos.asLong())) continue;
+                double ng = cur.g + m.cost;
+                Node nb = all.get(m.pos.asLong());
+                if (nb == null) {
+                    nb = new Node(m.pos);
+                    all.put(m.pos.asLong(), nb);
+                } else if (ng >= nb.g) {
+                    continue;
+                }
+                nb.parent = cur;
+                nb.g = ng;
+                nb.f = ng + heuristic(m.pos, heuristicTarget);
+                open.add(nb);
+            }
+        }
+        return List.of();
+    }
+
     private static boolean lineOfSight(World world, Vec3d eye, Vec3d target, BlockPos targetPos) {
         // Pass the player as the ray entity: it disambiguates the Entity vs
         // ShapeContext constructor overloads and avoids a null shape context.
