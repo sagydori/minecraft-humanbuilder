@@ -422,9 +422,11 @@ public final class BuilderStateMachine {
         long bestKey = Long.MAX_VALUE;
         boolean bestFwd = false;
         Vec3d from = new Vec3d(player.getX(), player.getY(), player.getZ());
+        java.util.List<BlockPos> layerPositions = new java.util.ArrayList<>();
         for (Target t : targetCache) {
             if (t.pos().getY() != layerY || blacklisted(t.pos())) continue;
             if (structuralPhase && !isStructural(client, t)) continue;
+            layerPositions.add(t.pos());
             if (cfg.serpentineSweep) {
                 long k = sweepKey(t.pos());
                 boolean fwd = k > lastPlacedKey;
@@ -447,6 +449,13 @@ public final class BuilderStateMachine {
                 return;
             }
             boolean overlaps = BlockPlacementMath.overlapsPlayer(player, sol);
+            // Baritone-style: prefer walking to the vantage that reaches the most
+            // remaining blocks (place a whole cluster per stop) over walking to
+            // this single block's neighbour. Falls back to per-target navigation.
+            if (cfg.enableNavigation && cfg.coverageStanding
+                    && startCoverageNavigation(client, player, chosen, layerPositions)) {
+                return;
+            }
             if (cfg.enableNavigation && startNavigation(client, player, chosen, sol)) {
                 Scaffolder.INSTANCE.reset();
                 scaffoldGoal = null;
@@ -647,6 +656,30 @@ public final class BuilderStateMachine {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Walk to a coverage-maximising vantage (reaches the most remaining layer
+     * blocks) rather than to one block's neighbour, so a whole cluster is placed
+     * per stop. {@code navTarget} stays the sweep block so arrival re-evaluation
+     * and blacklisting still work. Returns false to fall back to per-target nav.
+     */
+    private boolean startCoverageNavigation(MinecraftClient client, ClientPlayerEntity player,
+                                            Target chosen, java.util.List<BlockPos> layerPositions) {
+        if (layerPositions.size() < 2) return false; // no cluster to batch — use per-target nav
+        double reach = player.getBlockInteractionRange() - 0.3;
+        BlockPos feet = player.getBlockPos();
+        BlockPos stand = Pathfinder.findCoverageStand(client.world, layerPositions, feet, reach);
+        if (stand == null || stand.equals(feet)) return false;
+        List<BlockPos> path = Pathfinder.findPath(client.world, feet, stand);
+        if (path.isEmpty()) return false;
+        NavigationController.INSTANCE.setPath(path);
+        Scaffolder.INSTANCE.reset();
+        scaffoldGoal = null;
+        navTarget = chosen.pos();
+        recoveryAttempts = 0;
+        state = State.NAVIGATING;
+        return true;
     }
 
     private boolean startNavigation(MinecraftClient client, ClientPlayerEntity player,

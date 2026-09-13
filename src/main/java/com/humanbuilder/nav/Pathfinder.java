@@ -251,6 +251,68 @@ public final class Pathfinder {
         return best;
     }
 
+    /**
+     * Baritone-style "do the most work from one spot": pick a standable cell from
+     * which the greatest number of {@code targets} are within {@code reach} and in
+     * line of sight, so the builder places a whole cluster before walking again
+     * instead of hopping block-to-block (which our per-target
+     * {@link #findStandingPosition} caused by standing right next to a single
+     * block). Candidate cells are seeded from the reach neighbourhoods of the
+     * targets nearest {@code from}; ties favour cells nearer {@code from} (less
+     * walking). Returns null if nothing qualifies.
+     */
+    public static BlockPos findCoverageStand(World world, List<BlockPos> targets,
+                                             BlockPos from, double reach) {
+        if (targets == null || targets.isEmpty()) return null;
+        int r = Math.max(1, (int) Math.floor(reach));
+        double reachSq = (reach - 0.1) * (reach - 0.1);
+
+        // Seed candidate stands from the targets nearest the player.
+        List<BlockPos> seeds = new ArrayList<>(targets);
+        seeds.sort(Comparator.comparingDouble(t -> t.getSquaredDistance(from)));
+        int seedCount = Math.min(seeds.size(), 10);
+
+        Set<Long> seen = new HashSet<>();
+        List<BlockPos> cands = new ArrayList<>();
+        for (int i = 0; i < seedCount; i++) {
+            BlockPos t = seeds.get(i);
+            for (int dx = -r; dx <= r; dx++)
+                for (int dz = -r; dz <= r; dz++)
+                    for (int dy = -1; dy <= 1; dy++) {
+                        BlockPos c = t.add(dx, dy, dz);
+                        if (c.equals(from)) continue;      // current spot is already exhausted
+                        if (!seen.add(c.asLong())) continue;
+                        if (standable(world, c)) cands.add(c);
+                    }
+        }
+        if (cands.isEmpty()) return null;
+
+        // Bound the scoring work: score the standable cells nearest the player.
+        cands.sort(Comparator.comparingDouble(c -> c.getSquaredDistance(from)));
+        int scoreCount = Math.min(cands.size(), 60);
+        int targetCount = Math.min(targets.size(), 48);
+
+        BlockPos best = null;
+        double bestScore = 0.0;
+        for (int i = 0; i < scoreCount; i++) {
+            BlockPos c = cands.get(i);
+            Vec3d eye = Vec3d.ofCenter(c).add(0, EYE_HEIGHT - 0.5, 0);
+            int cover = 0;
+            for (int j = 0; j < targetCount; j++) {
+                BlockPos t = targets.get(j);
+                Vec3d tc = Vec3d.ofCenter(t);
+                if (eye.squaredDistanceTo(tc) > reachSq) continue;
+                if (!lineOfSight(world, eye, tc, t)) continue;
+                cover++;
+            }
+            if (cover == 0) continue;
+            // Prefer the most coverage; nudge toward nearer cells to cut walking.
+            double score = cover - 0.002 * Math.sqrt(c.getSquaredDistance(from));
+            if (best == null || score > bestScore) { bestScore = score; best = c; }
+        }
+        return best;
+    }
+
     private static boolean lineOfSight(World world, Vec3d eye, Vec3d target, BlockPos targetPos) {
         // Pass the player as the ray entity: it disambiguates the Entity vs
         // ShapeContext constructor overloads and avoids a null shape context.

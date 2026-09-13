@@ -33,6 +33,11 @@ public final class BuilderConfig {
      *  and true attachables (torches, rails, carpets) — supports always exist
      *  first, exactly how a person rough-builds then details. */
     public boolean structuralFirst = true;
+    /** When walking, go to the vantage that reaches the MOST remaining blocks and
+     *  place the whole cluster from there (Baritone "do the most work per spot"),
+     *  instead of walking to a single block's neighbour and hopping block-to-block.
+     *  This is the biggest speed win: far fewer walk legs. */
+    public boolean coverageStanding = true;
     /** Swallow real mouse input while the bot is active. */
     public boolean blockUserInput = true;
 

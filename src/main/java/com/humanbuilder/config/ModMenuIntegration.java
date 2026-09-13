@@ -46,6 +46,9 @@ public class ModMenuIntegration implements ModMenuApi {
         order.addEntry(eb.startBooleanToggle(Text.literal("Structural blocks first"), cfg.structuralFirst)
                 .setTooltip(Text.literal("Place the solid mass before slabs/stairs/torches/rails so supports exist first."))
                 .setSaveConsumer(v -> cfg.structuralFirst = v).build());
+        order.addEntry(eb.startBooleanToggle(Text.literal("Coverage standing (fewer walks)"), cfg.coverageStanding)
+                .setTooltip(Text.literal("Walk to the spot that reaches the most blocks and place the whole cluster there, instead of hopping block-to-block. Biggest speed win."))
+                .setSaveConsumer(v -> cfg.coverageStanding = v).build());
 
         ConfigCategory aim = builder.getOrCreateCategory(Text.literal("Aim realism"));
         aim.addEntry(eb.startBooleanToggle(Text.literal("Micro-tremor"), cfg.enableTremor)
