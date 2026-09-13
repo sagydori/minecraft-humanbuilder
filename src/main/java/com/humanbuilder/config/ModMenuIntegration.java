@@ -61,6 +61,9 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setMin(0.0).setMax(1.0).setSaveConsumer(v -> cfg.overshootChance = v).build());
 
         ConfigCategory timing = builder.getOrCreateCategory(Text.literal("Timing"));
+        timing.addEntry(eb.startBooleanToggle(Text.literal("Pipeline aim with cooldown"), cfg.pipelineAim)
+                .setTooltip(Text.literal("Aim at the next block while the last placement's cooldown elapses (faster, and how a person actually builds), instead of waiting then aiming."))
+                .setSaveConsumer(v -> cfg.pipelineAim = v).build());
         timing.addEntry(eb.startDoubleField(Text.literal("Click delay mean (ms)"), cfg.clickDelayMeanMs)
                 .setMin(0.0).setSaveConsumer(v -> cfg.clickDelayMeanMs = v).build());
         timing.addEntry(eb.startDoubleField(Text.literal("Click delay std (ms)"), cfg.clickDelayStdMs)

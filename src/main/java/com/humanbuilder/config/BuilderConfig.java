@@ -53,6 +53,11 @@ public final class BuilderConfig {
     public double clickDelayMeanMs = 240.0;
     /** Std-dev of the Gaussian per-placement cooldown, ms. */
     public double clickDelayStdMs = 55.0;
+    /** Overlap the next block's aim with the previous placement's cooldown (a
+     *  person moves their crosshair to the next spot while the last block
+     *  registers) instead of serialising wait-then-aim. Keeps the click cadence
+     *  as a floor, so it's both faster and more realistic. */
+    public boolean pipelineAim = true;
     /** Inventory swap click cadence (blueprint: mean 220, std 40). */
     public double invClickMeanMs = 220.0;
     public double invClickStdMs = 40.0;

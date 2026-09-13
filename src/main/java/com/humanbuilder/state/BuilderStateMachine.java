@@ -85,6 +85,9 @@ public final class BuilderStateMachine {
     private final Map<Long, Integer> placeFails = new HashMap<>();
 
     private long waitUntilMs = 0L;
+    /** Earliest time the next placement click may fire (enforces the human cadence
+     *  while the aim for that block overlaps the previous placement's cooldown). */
+    private long nextPlaceAllowedMs = 0L;
     private long fetchStartMs = 0L;
     /** Grace window after a placement during which a popped-up screen is auto-closed. */
     private long allowScreenCloseUntil = 0L;
@@ -847,11 +850,20 @@ public final class BuilderStateMachine {
     }
 
     private void beginClicking(MinecraftClient client) {
+        long now = System.currentTimeMillis();
         long delay = 0L;
         if (StochasticEngine.INSTANCE.rollHesitation()) {
             delay = (long) StochasticEngine.INSTANCE.hesitationMs();
         }
-        waitUntilMs = System.currentTimeMillis() + delay;
+        waitUntilMs = now + delay;
+        // Pipelining: this block's aim already ran while the previous placement's
+        // cadence was elapsing, so here we only wait out any remaining inter-click
+        // interval (and the rare hesitation). This overlaps the slow aim with the
+        // cooldown — how a person moves to the next spot while the last block
+        // registers — rather than serialising wait-then-aim.
+        if (BuilderConfig.INSTANCE.pipelineAim) {
+            waitUntilMs = Math.max(waitUntilMs, nextPlaceAllowedMs);
+        }
         state = State.CLICKING;
     }
 
@@ -859,8 +871,16 @@ public final class BuilderStateMachine {
         if (System.currentTimeMillis() < waitUntilMs) return;
         if (!performPlacement(client)) return; // skipped (e.g. would place into self) — state already set
         double factor = TPSMonitor.INSTANCE.getDelayFactor();
-        waitUntilMs = System.currentTimeMillis()
-                + (long) StochasticEngine.INSTANCE.placementCooldownMs(factor);
+        long cd = (long) StochasticEngine.INSTANCE.placementCooldownMs(factor);
+        if (BuilderConfig.INSTANCE.pipelineAim) {
+            // Enforce the human click cadence at the NEXT click; wait only a short
+            // settle here so the placement registers for the success check while
+            // the next block's fetch+aim proceeds inside the cadence window.
+            nextPlaceAllowedMs = System.currentTimeMillis() + cd;
+            waitUntilMs = System.currentTimeMillis() + 120L;
+        } else {
+            waitUntilMs = System.currentTimeMillis() + cd;
+        }
         state = State.COOLDOWN;
     }
 
@@ -962,6 +982,7 @@ public final class BuilderStateMachine {
         currentLayerY = Integer.MIN_VALUE;
         lastPlacedPos = null;
         lastPlacedKey = Long.MIN_VALUE;
+        nextPlaceAllowedMs = 0L;
         SchematicBridge.INSTANCE.clearSkips();
         Scaffolder.INSTANCE.reset();
         scaffoldGoal = null;
@@ -1001,6 +1022,7 @@ public final class BuilderStateMachine {
         currentLayerY = Integer.MIN_VALUE;
         lastPlacedPos = null;
         lastPlacedKey = Long.MIN_VALUE;
+        nextPlaceAllowedMs = 0L;
         SchematicBridge.INSTANCE.clearSkips();
         Scaffolder.INSTANCE.reset();
         scaffoldGoal = null;
