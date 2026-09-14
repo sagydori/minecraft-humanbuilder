@@ -14,14 +14,13 @@
     --bg:#05060f; --bg2:#0a0b1e; --panel:#121430cc; --panel2:#171a3acc;
     --edge:#2a2f5c; --text:#eef1ff; --muted:#9aa3cf;
     --violet:#7c5cff; --violet-hi:#9c86ff; --cyan:#38e8ff; --gold:#ffd36b;
-    --danger:#ff6f8b;
     --shadow:0 14px 40px rgba(0,0,0,.55);
     --glow:0 0 26px rgba(124,92,255,.45);
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
   body{
-    margin:0;color:var(--text);
+    margin:0;color:var(--text);overflow-x:hidden;
     font-family:Inter,system-ui,Segoe UI,Roboto,sans-serif;line-height:1.65;
     -webkit-font-smoothing:antialiased;
     background:
@@ -33,50 +32,76 @@
   }
   a{color:var(--cyan);text-decoration:none}
   a:hover{text-decoration:underline}
-  .wrap{max-width:1060px;margin:0 auto;padding-inline:22px}
+  .wrap{max-width:1060px;margin:0 auto;padding-inline:22px;position:relative}
 
-  /* starfield canvas sits behind everything */
   #stars{position:fixed;inset:0;z-index:-2;pointer-events:none}
-  /* faint drifting grid, like a star map */
   .grid-bg{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;
     background-image:
       linear-gradient(rgba(124,92,255,.05) 1px,transparent 1px),
       linear-gradient(90deg,rgba(56,232,255,.045) 1px,transparent 1px);
     background-size:44px 44px;mask-image:radial-gradient(circle at 50% 30%,#000,transparent 78%)}
 
+  /* aurora ribbon across the top */
+  .aurora{position:fixed;top:-160px;left:-10%;width:120%;height:340px;z-index:-1;pointer-events:none;
+    filter:blur(60px);opacity:.5;
+    background:
+      radial-gradient(40% 120% at 20% 50%, rgba(56,232,255,.5), transparent 70%),
+      radial-gradient(40% 120% at 55% 40%, rgba(124,92,255,.55), transparent 70%),
+      radial-gradient(40% 120% at 85% 55%, rgba(255,211,107,.35), transparent 70%);
+    animation:aurora 16s ease-in-out infinite alternate}
+  @keyframes aurora{from{transform:translateX(-40px) skewX(-6deg)}to{transform:translateX(40px) skewX(6deg)}}
+
+  /* drifting 3D crystal-block asteroids */
+  .floaties{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:visible}
+  .cube3d{position:absolute;width:64px;height:64px;transform-style:preserve-3d;opacity:.5;
+    animation:spin var(--sp,26s) linear infinite, bob var(--bb,9s) ease-in-out infinite alternate}
+  .cube3d .f{position:absolute;inset:0;border:1px solid rgba(56,232,255,.35)}
+  .cube3d .t{background:linear-gradient(135deg,rgba(156,134,255,.55),rgba(56,232,255,.35));transform:rotateX(90deg) translateZ(32px)}
+  .cube3d .l{background:linear-gradient(135deg,rgba(124,92,255,.5),rgba(30,20,80,.5));transform:rotateY(-90deg) translateZ(32px)}
+  .cube3d .r{background:linear-gradient(135deg,rgba(56,232,255,.4),rgba(20,30,80,.5));transform:translateZ(32px)}
+  @keyframes spin{to{transform:rotateX(360deg) rotateY(360deg)}}
+  @keyframes bob{from{margin-top:-14px}to{margin-top:14px}}
+
   /* nav */
-  nav{display:flex;align-items:center;justify-content:space-between;padding:20px 0}
+  nav{display:flex;align-items:center;justify-content:space-between;padding:20px 0;position:relative;z-index:2}
   .brand{display:flex;align-items:center;gap:12px;font-weight:800;letter-spacing:.3px}
   .planet{width:34px;height:34px;border-radius:50%;position:relative;
     background:radial-gradient(circle at 32% 30%,var(--violet-hi),var(--violet) 55%,#3a2a8f 100%);
     box-shadow:var(--glow),inset -6px -6px 12px rgba(0,0,0,.45)}
-  .planet::after{content:"";position:absolute;left:-6px;right:-6px;top:44%;height:8px;
+  .planet::before{content:"";position:absolute;left:-6px;right:-6px;top:44%;height:8px;
     border-radius:50%;background:linear-gradient(90deg,transparent,var(--gold),transparent);
     transform:rotate(-20deg);opacity:.85}
+  .planet::after{content:"";position:absolute;width:6px;height:6px;border-radius:50%;
+    top:50%;left:50%;margin:-3px;background:#dfe6ff;box-shadow:0 0 8px #fff;
+    animation:orbit 6s linear infinite}
+  @keyframes orbit{from{transform:rotate(0) translateX(24px) rotate(0)}to{transform:rotate(360deg) translateX(24px) rotate(-360deg)}}
   .nav-links{display:flex;gap:22px;font-size:14px;color:var(--muted);font-weight:600}
   .nav-links a{color:var(--muted)} .nav-links a:hover{color:var(--text);text-decoration:none}
 
   /* hero */
-  header{padding:56px 0 34px;text-align:center;position:relative}
+  header{padding:60px 0 34px;text-align:center;position:relative;z-index:2}
   .badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:24px}
   .badge{font-size:12px;font-weight:700;color:var(--muted);
     background:linear-gradient(180deg,var(--panel),var(--panel2));
     border:1px solid var(--edge);border-radius:999px;padding:6px 13px;backdrop-filter:blur(6px)}
   .badge b{color:var(--cyan)}
   h1{font-family:'Press Start 2P',monospace;font-size:clamp(26px,5.4vw,52px);
-    line-height:1.28;margin:8px 0 4px;text-shadow:0 3px 24px rgba(124,92,255,.55)}
-  h1 .g{background:linear-gradient(90deg,var(--cyan),var(--violet-hi));
-    -webkit-background-clip:text;background-clip:text;color:transparent}
+    line-height:1.28;margin:8px 0 4px}
+  h1 .g{background:linear-gradient(90deg,var(--cyan),var(--violet-hi),var(--gold),var(--cyan));
+    background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
+    animation:sheen 8s linear infinite;filter:drop-shadow(0 3px 24px rgba(124,92,255,.55))}
+  @keyframes sheen{to{background-position:300% 0}}
   .tag{font-size:clamp(15px,2.4vw,20px);color:#c3c9ee;max-width:660px;margin:16px auto 0}
   .tag b{color:#fff}
   .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:32px}
   .btn{display:inline-flex;align-items:center;gap:10px;font-weight:800;font-size:16px;
     padding:15px 28px;border-radius:14px;border:1px solid transparent;cursor:pointer;transition:.18s}
-  .btn-primary{color:#08040f;
+  .btn-primary{color:#08040f;position:relative;
     background:linear-gradient(180deg,var(--cyan),var(--violet-hi));
-    box-shadow:var(--glow),0 8px 24px rgba(56,232,255,.28)}
-  .btn-primary:hover{transform:translateY(-2px);text-decoration:none;
-    box-shadow:0 0 34px rgba(124,92,255,.6),0 12px 30px rgba(56,232,255,.35)}
+    box-shadow:var(--glow),0 8px 24px rgba(56,232,255,.28);animation:pulse 3.2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 0 22px rgba(124,92,255,.4),0 8px 24px rgba(56,232,255,.25)}
+    50%{box-shadow:0 0 40px rgba(56,232,255,.6),0 8px 30px rgba(124,92,255,.45)}}
+  .btn-primary:hover{transform:translateY(-2px);text-decoration:none}
   .btn-primary:active{transform:translateY(1px)}
   .btn-ghost{background:linear-gradient(180deg,var(--panel),var(--panel2));
     border-color:var(--edge);color:var(--text);backdrop-filter:blur(6px)}
@@ -84,29 +109,30 @@
   .dl-note{margin-top:14px;font-size:13px;color:var(--muted)}
   .dl-note code{background:#0c0e24;border:1px solid var(--edge);padding:2px 7px;border-radius:6px;color:var(--cyan)}
 
-  section{padding:36px 0}
-  h2{font-family:'Press Start 2P',monospace;font-size:16px;color:var(--text);
-    margin:0 0 24px;letter-spacing:.4px}
+  section{padding:36px 0;position:relative;z-index:2}
+  h2{font-family:'Press Start 2P',monospace;font-size:16px;color:var(--text);margin:0 0 24px;letter-spacing:.4px}
   h2 .n{color:var(--cyan)}
 
-  /* feature cards */
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:16px}
-  .card{position:relative;background:linear-gradient(180deg,var(--panel),var(--panel2));
+  .card{position:relative;overflow:hidden;background:linear-gradient(180deg,var(--panel),var(--panel2));
     border:1px solid var(--edge);border-radius:16px;padding:22px;box-shadow:var(--shadow);
-    backdrop-filter:blur(8px);transition:.18s}
-  .card:hover{transform:translateY(-3px);border-color:var(--violet)}
+    backdrop-filter:blur(8px);transition:transform .18s,border-color .18s,box-shadow .18s}
+  .card::before{content:"";position:absolute;inset:-1px;border-radius:16px;padding:1px;pointer-events:none;
+    background:linear-gradient(120deg,transparent,rgba(56,232,255,.5),transparent 40%);
+    opacity:0;transition:.25s;-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor;mask-composite:exclude}
+  .card:hover{transform:translateY(-4px);border-color:var(--violet);box-shadow:0 18px 46px rgba(124,92,255,.25)}
+  .card:hover::before{opacity:1}
   .card .ic{font-size:26px;margin-bottom:12px;filter:drop-shadow(0 0 10px rgba(124,92,255,.6))}
   .card h3{margin:0 0 6px;font-size:16px}
   .card p{margin:0;color:var(--muted);font-size:14px}
 
-  /* requirements + steps */
   .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--edge);
     border-radius:18px;padding:28px;box-shadow:var(--shadow);backdrop-filter:blur(8px)}
   .req{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}
   .req .pill{display:flex;align-items:center;gap:8px;background:#0b0d22;border:1px solid var(--edge);
     border-radius:12px;padding:10px 14px;font-weight:600;font-size:14px}
-  .req .pill span{color:var(--cyan)}
-  .req .pill small{color:var(--muted);font-weight:500}
+  .req .pill span{color:var(--cyan)} .req .pill small{color:var(--muted);font-weight:500}
   ol.steps{counter-reset:s;list-style:none;padding:0;margin:0;display:grid;gap:16px}
   ol.steps li{counter-increment:s;position:relative;padding-left:54px;color:var(--muted)}
   ol.steps li::before{content:counter(s);position:absolute;left:0;top:-2px;width:36px;height:36px;
@@ -120,17 +146,33 @@
     border-radius:0 14px 14px 0;padding:18px 20px;color:var(--muted);font-size:14px}
   .note b{color:var(--text)}
 
-  footer{border-top:1px solid var(--edge);margin-top:24px;padding:30px 0 54px;color:var(--muted);font-size:13px;text-align:center}
+  footer{border-top:1px solid var(--edge);margin-top:24px;padding:30px 0 54px;color:var(--muted);font-size:13px;text-align:center;position:relative;z-index:2}
   footer a{color:var(--muted);font-weight:600}
   .disclaim{max-width:740px;margin:12px auto 0;font-size:12px;opacity:.8}
 
-  @media (prefers-reduced-motion:reduce){#stars{display:none}}
+  /* scroll reveal */
+  .reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease}
+  .reveal.in{opacity:1;transform:none}
+
+  @media (prefers-reduced-motion:reduce){
+    #stars,.aurora,.floaties{display:none}
+    .reveal{opacity:1;transform:none;transition:none}
+    .planet::after,.btn-primary,h1 .g{animation:none}
+  }
 </style>
 </head>
 <body>
 <canvas id="stars" aria-hidden="true"></canvas>
+<div class="aurora" aria-hidden="true"></div>
 <div class="grid-bg"></div>
 <div class="wrap">
+
+  <div class="floaties" aria-hidden="true">
+    <div class="cube3d" style="left:4%;top:120px;--sp:24s;--bb:8s"><span class="f t"></span><span class="f l"></span><span class="f r"></span></div>
+    <div class="cube3d" style="right:6%;top:80px;width:44px;height:44px;--sp:30s;--bb:11s"><span class="f t"></span><span class="f l"></span><span class="f r"></span></div>
+    <div class="cube3d" style="right:16%;top:300px;width:34px;height:34px;--sp:20s;--bb:7s;opacity:.35"><span class="f t"></span><span class="f l"></span><span class="f r"></span></div>
+    <div class="cube3d" style="left:12%;top:340px;width:26px;height:26px;--sp:34s;--bb:10s;opacity:.3"><span class="f t"></span><span class="f l"></span><span class="f r"></span></div>
+  </div>
 
   <nav>
     <div class="brand"><div class="planet"></div> HumanBuilder</div>
@@ -163,7 +205,7 @@
     <div class="dl-note">Latest build: <code id="dlName">resolving…</code> · always the newest jar · pair with the mods below</div>
   </header>
 
-  <section id="features">
+  <section id="features" class="reveal">
     <h2><span class="n">✦</span> What it does</h2>
     <div class="grid">
       <div class="card"><div class="ic">🛰️</div><h3>Builds it for you</h3>
@@ -182,8 +224,8 @@
   </section>
 
   <section id="install">
-    <h2><span class="n">✦</span> What you need</h2>
-    <div class="panel">
+    <h2 class="reveal"><span class="n">✦</span> What you need</h2>
+    <div class="panel reveal">
       <p style="margin:0 0 14px;color:var(--muted)">Install these Fabric mods for <b>Minecraft 1.21.11</b> alongside HumanBuilder:</p>
       <div class="req">
         <div class="pill"><span>▸</span> Fabric API</div>
@@ -195,8 +237,8 @@
     </div>
 
     <div style="height:22px"></div>
-    <h2><span class="n">✦</span> Get started</h2>
-    <div class="panel">
+    <h2 class="reveal"><span class="n">✦</span> Get started</h2>
+    <div class="panel reveal">
       <ol class="steps">
         <li>Grab the <b>HumanBuilder</b> jar with the button above.</li>
         <li>Drop it into your <code class="k">.minecraft/mods</code> folder, along with Fabric API, Litematica and malilib.</li>
@@ -208,7 +250,7 @@
     </div>
 
     <div style="height:22px"></div>
-    <div class="note">
+    <div class="note reveal">
       <b>Made for personal use.</b> HumanBuilder is for singleplayer and your own server, to estimate how
       long a manual build takes. It's client-side and never fakes network packets — it only presses the
       same keys and moves the same mouse you would. The human-like imperfection is there to make the time
@@ -229,62 +271,101 @@
 </div>
 
 <script>
-  // Lightweight twinkling starfield.
+  // Starfield with twinkle, drift, constellation links and shooting stars.
   (function () {
     var c = document.getElementById("stars");
     if (!c || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    var ctx = c.getContext("2d"), stars = [], W, H, dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var ctx = c.getContext("2d"), stars = [], meteors = [], W, H,
+        dpr = Math.min(window.devicePixelRatio || 1, 2), nextMeteor = 0;
     function resize() {
       W = c.width = Math.floor(innerWidth * dpr);
       H = c.height = Math.floor(innerHeight * dpr);
       c.style.width = innerWidth + "px"; c.style.height = innerHeight + "px";
-      var count = Math.round((innerWidth * innerHeight) / 9000);
+      var count = Math.min(150, Math.round((innerWidth * innerHeight) / 11000));
       stars = [];
       for (var i = 0; i < count; i++) {
         stars.push({
           x: Math.random() * W, y: Math.random() * H,
           r: (Math.random() * 1.3 + 0.3) * dpr,
           a: Math.random(), s: Math.random() * 0.02 + 0.004,
-          vx: (Math.random() - 0.5) * 0.06 * dpr,
+          vx: (Math.random() - 0.5) * 0.05 * dpr,
           hue: Math.random() < 0.5 ? "180,232,255" : (Math.random() < 0.5 ? "156,134,255" : "255,211,107")
         });
       }
     }
-    function tick() {
+    function spawnMeteor() {
+      var edge = Math.random() * W * 0.8;
+      meteors.push({
+        x: edge, y: -20 * dpr,
+        vx: (2.6 + Math.random() * 2.2) * dpr, vy: (3.4 + Math.random() * 2.4) * dpr,
+        len: (90 + Math.random() * 80) * dpr, life: 1
+      });
+    }
+    function tick(ts) {
       ctx.clearRect(0, 0, W, H);
+      var link = 120 * dpr, link2 = link * link;
+      // constellation links (faint, only between nearby stars)
       for (var i = 0; i < stars.length; i++) {
-        var st = stars[i];
+        var a = stars[i];
+        for (var j = i + 1; j < stars.length; j++) {
+          var b = stars[j], dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy;
+          if (d2 < link2) {
+            var o = (1 - d2 / link2) * 0.12;
+            ctx.strokeStyle = "rgba(124,140,255," + o.toFixed(3) + ")";
+            ctx.lineWidth = dpr * 0.6;
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+          }
+        }
+      }
+      // stars
+      for (var k = 0; k < stars.length; k++) {
+        var st = stars[k];
         st.a += st.s; var tw = 0.5 + 0.5 * Math.sin(st.a);
         st.x += st.vx; if (st.x < 0) st.x = W; if (st.x > W) st.x = 0;
         ctx.beginPath();
         ctx.fillStyle = "rgba(" + st.hue + "," + (0.25 + tw * 0.7).toFixed(3) + ")";
-        ctx.arc(st.x, st.y, st.r, 0, 6.283);
-        ctx.fill();
+        ctx.arc(st.x, st.y, st.r, 0, 6.283); ctx.fill();
+      }
+      // shooting stars
+      if (ts > nextMeteor) { spawnMeteor(); nextMeteor = ts + 2600 + Math.random() * 4200; }
+      for (var m = meteors.length - 1; m >= 0; m--) {
+        var e = meteors[m];
+        e.x += e.vx; e.y += e.vy; e.life -= 0.012;
+        var tx = e.x - e.vx / Math.hypot(e.vx, e.vy) * e.len,
+            ty = e.y - e.vy / Math.hypot(e.vx, e.vy) * e.len;
+        var g = ctx.createLinearGradient(e.x, e.y, tx, ty);
+        g.addColorStop(0, "rgba(255,255,255," + Math.max(0, e.life).toFixed(3) + ")");
+        g.addColorStop(1, "rgba(56,232,255,0)");
+        ctx.strokeStyle = g; ctx.lineWidth = 2 * dpr;
+        ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(tx, ty); ctx.stroke();
+        if (e.life <= 0 || e.y > H + 40 * dpr || e.x > W + 40 * dpr) meteors.splice(m, 1);
       }
       requestAnimationFrame(tick);
     }
     addEventListener("resize", resize, { passive: true });
-    resize(); tick();
+    resize(); requestAnimationFrame(tick);
   })();
 
-  // Resolve the newest release jar so the button + filename always reflect the
-  // latest build (the asset name changes every publish).
+  // Reveal sections on scroll.
+  (function () {
+    var els = document.querySelectorAll(".reveal");
+    if (!("IntersectionObserver" in window)) { els.forEach(function (e) { e.classList.add("in"); }); return; }
+    var io = new IntersectionObserver(function (ents) {
+      ents.forEach(function (en) { if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); } });
+    }, { threshold: 0.12 });
+    els.forEach(function (e) { io.observe(e); });
+  })();
+
+  // Resolve the newest release jar so the button + filename always reflect the latest build.
   (function () {
     var api = "https://api.github.com/repos/sagydori/minecraft-humanbuilder/releases/latest";
-    var btn = document.getElementById("dlBtn");
-    var nameEl = document.getElementById("dlName");
+    var btn = document.getElementById("dlBtn"), nameEl = document.getElementById("dlName");
     fetch(api, { headers: { "Accept": "application/vnd.github+json" } })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function (d) {
-        var jar = (d.assets || []).filter(function (a) {
-          return /\.jar$/.test(a.name) && !/-sources/.test(a.name);
-        })[0];
-        if (jar) {
-          btn.href = jar.browser_download_url;
-          nameEl.textContent = jar.name;
-        } else {
-          nameEl.textContent = d.tag_name || "see releases";
-        }
+        var jar = (d.assets || []).filter(function (a) { return /\.jar$/.test(a.name) && !/-sources/.test(a.name); })[0];
+        if (jar) { btn.href = jar.browser_download_url; nameEl.textContent = jar.name; }
+        else { nameEl.textContent = d.tag_name || "see releases"; }
       })
       .catch(function () { nameEl.textContent = "see Releases →"; });
   })();
