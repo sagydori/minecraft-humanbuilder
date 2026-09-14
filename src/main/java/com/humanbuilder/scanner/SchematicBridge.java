@@ -108,6 +108,20 @@ public final class SchematicBridge {
         return Integer.MAX_VALUE;
     }
 
+    /**
+     * True if this position still needs a block placed (schematic solid, world
+     * empty/replaceable, not skipped) — Baritone's "incorrect + placeable" test,
+     * used for the support-first filter (don't place a block while the one below
+     * it is itself still to be placed).
+     */
+    public boolean needsPlacement(MinecraftClient client, BlockPos pos) {
+        ClientWorld real = client.world;
+        WorldSchematic schem = SchematicWorldHandler.getSchematicWorld();
+        if (real == null || schem == null) return false;
+        if (skip.contains(pos.asLong())) return false;
+        return isRemaining(schem.getBlockState(pos), real.getBlockState(pos));
+    }
+
     /** Give up on every remaining block at layer {@code y} (used to break deadlocks). */
     public int skipRemainingAt(MinecraftClient client, int y) {
         ClientPlayerEntity player = client.player;

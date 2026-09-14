@@ -40,6 +40,9 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setSaveConsumer(v -> cfg.reportEstimate = v).build());
 
         ConfigCategory order = builder.getOrCreateCategory(Text.literal("Build order"));
+        order.addEntry(eb.startBooleanToggle(Text.literal("Baritone selection (nearest, support-first)"), cfg.baritoneSelection)
+                .setTooltip(Text.literal("Choose blocks exactly like Baritone: act on the nearest actionable block, never placing one whose support below is still missing. Overrides the serpentine sweep."))
+                .setSaveConsumer(v -> cfg.baritoneSelection = v).build());
         order.addEntry(eb.startBooleanToggle(Text.literal("Serpentine (lawnmower) sweep"), cfg.serpentineSweep)
                 .setTooltip(Text.literal("Cover each layer row-by-row instead of hopping to the nearest block — less walking and backtracking."))
                 .setSaveConsumer(v -> cfg.serpentineSweep = v).build());

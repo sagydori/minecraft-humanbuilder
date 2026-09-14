@@ -25,10 +25,15 @@ public final class BuilderConfig {
     public int maxScanIterations = 400_000;
 
     // --- Placement ordering ---
-    /** Cover each layer in a boustrophedon (serpentine "lawnmower") sweep instead
-     *  of a greedy nearest-block hop — minimises walking, turns and backtracking.
-     *  The optimal known pattern for covering a 2D grid; also looks deliberate. */
-    public boolean serpentineSweep = true;
+    /** Baritone's exact selection: act on the NEAREST actionable block, and never
+     *  place a block while the one directly below it (or two below) is itself still
+     *  to be placed (support first). No lawnmower pattern — this is what Baritone
+     *  does. When true it overrides {@link #serpentineSweep}. */
+    public boolean baritoneSelection = true;
+    /** Alternative: cover each layer in a boustrophedon (serpentine "lawnmower")
+     *  sweep. Tidier-looking rows, but not how Baritone chooses. Only used when
+     *  {@link #baritoneSelection} is false. */
+    public boolean serpentineSweep = false;
     /** Within a layer, finish the solid full-cube mass before slabs/stairs/fences
      *  and true attachables (torches, rails, carpets) — supports always exist
      *  first, exactly how a person rough-builds then details. */

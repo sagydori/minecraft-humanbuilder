@@ -386,6 +386,7 @@ public final class BuilderStateMachine {
         double bestReachD = Double.MAX_VALUE;
         long bestReachKey = Long.MAX_VALUE;
         boolean bestReachFwd = false;
+        boolean bestReachBlocked = false;
         for (Target t : targetCache) {
             if (t.pos().getY() != layerY) continue;
             anyLayerInCache = true;
@@ -396,7 +397,15 @@ public final class BuilderStateMachine {
             if (s == null) continue;
             if (BlockPlacementMath.reachable(client.world, player, s)
                     && BlockPlacementMath.facingOkFrom(player, HAND, t.state(), s, eye)) {
-                if (cfg.serpentineSweep) {
+                if (cfg.baritoneSelection) {
+                    // Baritone: act on the NEAREST actionable block, but defer any
+                    // whose support below is itself still to be placed.
+                    boolean blk = downBlocked(client, t.pos());
+                    double d = t.pos().getSquaredDistance(eye.x, eye.y, eye.z);
+                    if (isBetterBaritone(blk, d, bestReach != null, bestReachBlocked, bestReachD)) {
+                        bestReachBlocked = blk; bestReachD = d; bestReach = t; bestReachSol = s;
+                    }
+                } else if (cfg.serpentineSweep) {
                     long k = sweepKey(t.pos());
                     boolean fwd = k > lastPlacedKey;
                     if (isBetterInSweep(fwd, k, bestReach != null, bestReachFwd, bestReachKey)) {
@@ -424,13 +433,20 @@ public final class BuilderStateMachine {
         double bestD = Double.MAX_VALUE;
         long bestKey = Long.MAX_VALUE;
         boolean bestFwd = false;
+        boolean bestBlocked = false;
         Vec3d from = new Vec3d(player.getX(), player.getY(), player.getZ());
         java.util.List<BlockPos> layerPositions = new java.util.ArrayList<>();
         for (Target t : targetCache) {
             if (t.pos().getY() != layerY || blacklisted(t.pos())) continue;
             if (structuralPhase && !isStructural(client, t)) continue;
             layerPositions.add(t.pos());
-            if (cfg.serpentineSweep) {
+            if (cfg.baritoneSelection) {
+                boolean blk = downBlocked(client, t.pos());
+                double d = t.pos().getSquaredDistance(from.x, from.y, from.z);
+                if (isBetterBaritone(blk, d, chosen != null, bestBlocked, bestD)) {
+                    bestBlocked = blk; bestD = d; chosen = t;
+                }
+            } else if (cfg.serpentineSweep) {
                 long k = sweepKey(t.pos());
                 boolean fwd = k > lastPlacedKey;
                 if (isBetterInSweep(fwd, k, chosen != null, bestFwd, bestKey)) {
@@ -571,6 +587,29 @@ public final class BuilderStateMachine {
         if (!haveBest) return true;
         if (fwd != bestFwd) return fwd;
         return key < bestKey;
+    }
+
+    /**
+     * Baritone's support-first rule: a placement is deferred while the block
+     * directly below it — or two below — is itself still to be placed, so we build
+     * the support before what rests on it (Baritone: {@code !placeable.contains(
+     * pos.down()) && !placeable.contains(pos.down(2))}).
+     */
+    private static boolean downBlocked(MinecraftClient client, BlockPos pos) {
+        return SchematicBridge.INSTANCE.needsPlacement(client, pos.down())
+                || SchematicBridge.INSTANCE.needsPlacement(client, pos.down(2));
+    }
+
+    /**
+     * Baritone selection comparator: prefer a block whose support is ready
+     * (not {@code blocked}); among equals, the nearest wins. No lawnmower order —
+     * Baritone acts on the nearest actionable block.
+     */
+    private static boolean isBetterBaritone(boolean blocked, double dist,
+                                            boolean haveBest, boolean bestBlocked, double bestDist) {
+        if (!haveBest) return true;
+        if (blocked != bestBlocked) return !blocked;
+        return dist < bestDist;
     }
 
     /** Solid full cube → structural mass; slabs/stairs/fences/attachables are not. */
