@@ -29,6 +29,14 @@ public final class NavigationController {
     private Vec3d lastPos = Vec3d.ZERO;
     private int stationaryTicks;
 
+    // Human-walk state: a slow weave + fine tremor so movement isn't robotically
+    // straight. The PLAN (route/waypoints) is Baritone's; only the steering along
+    // it is humanised.
+    private double walkClock;
+    private float wanderTargetDeg;
+    private long wanderRetargetMs;
+    private final java.util.Random rng = new java.util.Random();
+
     private NavigationController() {}
 
     public void setPath(List<BlockPos> path) {
@@ -67,9 +75,34 @@ public final class NavigationController {
             return Status.NAVIGATING;
         }
 
-        // Smoothly turn toward the waypoint (rate-limited).
+        // Aim toward the waypoint — but not roboticly straight. A person weaves a
+        // little as they hold W, their view has fine tremor, and their steering
+        // rate isn't uniform. The route is Baritone's; this is just how WE walk it.
         float targetYaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        turnToward(player, targetYaw, (float) cfg.turnSpeedDegPerTick);
+        float delta = MathHelper.wrapDegrees(targetYaw - player.getYaw());
+        float aimYaw = targetYaw;
+        float turnRate = (float) cfg.turnSpeedDegPerTick;
+
+        if (cfg.humanizeWalk) {
+            walkClock += 50;
+            long nowMs = System.currentTimeMillis();
+            if (nowMs >= wanderRetargetMs) {
+                wanderTargetDeg = (float) ((rng.nextDouble() * 2.0 - 1.0) * cfg.walkWanderDeg);
+                wanderRetargetMs = nowMs + 500 + rng.nextInt(900); // re-weave every 0.5–1.4s
+            }
+            // Slow weave + fine tremor; damp both as we close on the waypoint so we
+            // still arrive cleanly and never weave off a ledge or clip a corner.
+            float weave = (float) (wanderTargetDeg * (0.5 + 0.5 * Math.sin(walkClock * 0.004)));
+            float tremor = (float) (Math.sin(walkClock * 0.021) * 0.7 + Math.cos(walkClock * 0.013) * 0.5);
+            double precision = horiz < 1.5 ? 0.2 : 1.0;
+            aimYaw = targetYaw + (float) ((weave + tremor) * precision);
+            turnRate *= (float) (0.8 + 0.35 * (0.5 + 0.5 * Math.sin(walkClock * 0.006))); // non-uniform steering
+        }
+
+        turnToward(player, aimYaw, turnRate);
+        if (cfg.humanizeWalk) {
+            player.setPitch((float) (Math.sin(walkClock * 0.0025) * 2.5)); // subtle head bob
+        }
 
         // Walk forward; jump for step-ups or obstacles.
         press(client.options.forwardKey, true);
@@ -82,9 +115,10 @@ public final class NavigationController {
         boolean edge = !descending && edgeAhead(client, player);
         press(client.options.sneakKey, edge);
 
-        // Sprint only on long, clear, flat straightaways — never near a waypoint,
-        // an edge, an obstacle or a step-up (keeps it safe and accurate).
-        boolean canSprint = horiz > 3.0 && !edge && !obstacle && !stepUp && Math.abs(dy) < 0.6;
+        // Sprint only on long, clear, flat straightaways, and not mid-turn — never
+        // near a waypoint, an edge, an obstacle or a step-up (safe and accurate).
+        boolean canSprint = horiz > 3.0 && Math.abs(delta) < 25.0
+                && !edge && !obstacle && !stepUp && Math.abs(dy) < 0.6;
         press(client.options.sprintKey, canSprint);
 
         // Stuck detection: barely moved while trying to walk.

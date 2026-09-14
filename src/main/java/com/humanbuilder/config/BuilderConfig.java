@@ -88,6 +88,12 @@ public final class BuilderConfig {
     public int maxPathIterations = 4000;
     /** Camera turn rate while navigating, degrees per tick. */
     public double turnSpeedDegPerTick = 22.0;
+    /** Walk the Baritone-planned route like a person, not on rails: a slow weave,
+     *  fine view tremor, non-uniform steering and a subtle head bob (damped near
+     *  waypoints/ledges for safety). Cosmetic — does not change the route. */
+    public boolean humanizeWalk = true;
+    /** Peak weave (degrees) added to the walk heading when humanizeWalk is on. */
+    public double walkWanderDeg = 5.0;
 
     // --- Scaffolding (temporary staircase to reach higher layers) ---
     /** Build a temporary staircase when an upper target can't be reached/pathed to. */

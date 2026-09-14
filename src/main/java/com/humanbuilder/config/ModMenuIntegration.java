@@ -92,6 +92,11 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setMin(500).setMax(20000).setSaveConsumer(v -> cfg.maxPathIterations = v).build());
         nav.addEntry(eb.startDoubleField(Text.literal("Turn speed (deg/tick)"), cfg.turnSpeedDegPerTick)
                 .setMin(2.0).setMax(90.0).setSaveConsumer(v -> cfg.turnSpeedDegPerTick = v).build());
+        nav.addEntry(eb.startBooleanToggle(Text.literal("Human walk (weave, not on rails)"), cfg.humanizeWalk)
+                .setTooltip(Text.literal("Walk the planned route like a person — slight weave, view tremor, non-uniform turning, head bob. Cosmetic; doesn't change the route."))
+                .setSaveConsumer(v -> cfg.humanizeWalk = v).build());
+        nav.addEntry(eb.startDoubleField(Text.literal("Walk weave (deg)"), cfg.walkWanderDeg)
+                .setMin(0.0).setMax(20.0).setSaveConsumer(v -> cfg.walkWanderDeg = v).build());
         nav.addEntry(eb.startBooleanToggle(Text.literal("Build staircase to reach high layers"), cfg.enableScaffolding)
                 .setSaveConsumer(v -> cfg.enableScaffolding = v).build());
         nav.addEntry(eb.startIntField(Text.literal("Max scaffold blocks"), cfg.maxScaffoldBlocks)
