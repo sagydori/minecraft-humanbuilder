@@ -4,112 +4,136 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HumanBuilder — Litematica Auto-Builder for Minecraft 1.21.11</title>
-<meta name="description" content="A human-input-simulating Litematica schematic builder for Minecraft 1.21.11 (Fabric). Estimate how long your builds really take.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%236b4326'/%3E%3Crect width='16' height='7' fill='%235db85c'/%3E%3Crect y='5' width='16' height='2' fill='%234a9a4a'/%3E%3C/svg%3E">
+<meta name="description" content="A space-themed, human-like Litematica schematic builder for Minecraft 1.21.11 (Fabric). It builds like a real player so you can see how long a build really takes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%237c5cff'/%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%2338e8ff' stroke-width='1'/%3E%3Cellipse cx='8' cy='8' rx='7.5' ry='2.4' fill='none' stroke='%23ffd36b' stroke-width='1' transform='rotate(-20 8 8)'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0b0e13; --bg2:#0e1219; --panel:#151b24; --panel2:#1b222d;
-    --edge:#232c39; --text:#e7edf5; --muted:#93a0b4; --accent:#5db85c;
-    --accent-hi:#79d97b; --dirt:#7a4e2b; --dirt-hi:#9b6535; --danger:#e06c5a;
-    --shadow:0 10px 30px rgba(0,0,0,.45);
+    --bg:#05060f; --bg2:#0a0b1e; --panel:#121430cc; --panel2:#171a3acc;
+    --edge:#2a2f5c; --text:#eef1ff; --muted:#9aa3cf;
+    --violet:#7c5cff; --violet-hi:#9c86ff; --cyan:#38e8ff; --gold:#ffd36b;
+    --danger:#ff6f8b;
+    --shadow:0 14px 40px rgba(0,0,0,.55);
+    --glow:0 0 26px rgba(124,92,255,.45);
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
   body{
-    margin:0;background:
-      radial-gradient(1100px 500px at 50% -140px, rgba(93,184,92,.16), transparent 60%),
-      linear-gradient(180deg,var(--bg),var(--bg2));
-    color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,sans-serif;
-    line-height:1.6;-webkit-font-smoothing:antialiased;
+    margin:0;color:var(--text);
+    font-family:Inter,system-ui,Segoe UI,Roboto,sans-serif;line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+    background:
+      radial-gradient(1000px 620px at 15% -10%, rgba(124,92,255,.28), transparent 60%),
+      radial-gradient(900px 560px at 92% 4%, rgba(56,232,255,.18), transparent 58%),
+      radial-gradient(1200px 700px at 50% 118%, rgba(124,92,255,.16), transparent 60%),
+      linear-gradient(180deg,var(--bg),var(--bg2) 60%,#05060f);
+    background-attachment:fixed;
   }
-  a{color:var(--accent-hi);text-decoration:none}
+  a{color:var(--cyan);text-decoration:none}
   a:hover{text-decoration:underline}
-  .wrap{max-width:1040px;margin:0 auto;padding-inline:22px}
+  .wrap{max-width:1060px;margin:0 auto;padding-inline:22px}
 
-  /* pixel grid overlay */
-  .grid-bg{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.35;
+  /* starfield canvas sits behind everything */
+  #stars{position:fixed;inset:0;z-index:-2;pointer-events:none}
+  /* faint drifting grid, like a star map */
+  .grid-bg{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.5;
     background-image:
-      linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),
-      linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
-    background-size:34px 34px;mask-image:linear-gradient(180deg,#000,transparent 70%)}
+      linear-gradient(rgba(124,92,255,.05) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(56,232,255,.045) 1px,transparent 1px);
+    background-size:44px 44px;mask-image:radial-gradient(circle at 50% 30%,#000,transparent 78%)}
 
   /* nav */
   nav{display:flex;align-items:center;justify-content:space-between;padding:20px 0}
-  .brand{display:flex;align-items:center;gap:12px;font-weight:800;letter-spacing:.2px}
-  .cube{width:30px;height:30px;border-radius:5px;box-shadow:var(--shadow);
-    background:linear-gradient(180deg,var(--accent) 0 46%,#4a9a4a 46% 56%,var(--dirt) 56% 100%);
-    image-rendering:pixelated;border:2px solid rgba(0,0,0,.35)}
+  .brand{display:flex;align-items:center;gap:12px;font-weight:800;letter-spacing:.3px}
+  .planet{width:34px;height:34px;border-radius:50%;position:relative;
+    background:radial-gradient(circle at 32% 30%,var(--violet-hi),var(--violet) 55%,#3a2a8f 100%);
+    box-shadow:var(--glow),inset -6px -6px 12px rgba(0,0,0,.45)}
+  .planet::after{content:"";position:absolute;left:-6px;right:-6px;top:44%;height:8px;
+    border-radius:50%;background:linear-gradient(90deg,transparent,var(--gold),transparent);
+    transform:rotate(-20deg);opacity:.85}
   .nav-links{display:flex;gap:22px;font-size:14px;color:var(--muted);font-weight:600}
   .nav-links a{color:var(--muted)} .nav-links a:hover{color:var(--text);text-decoration:none}
 
   /* hero */
-  header{padding:46px 0 30px;text-align:center}
-  .badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:22px}
-  .badge{font-size:12px;font-weight:700;color:var(--muted);background:var(--panel);
-    border:1px solid var(--edge);border-radius:999px;padding:6px 12px}
-  .badge b{color:var(--accent-hi)}
-  h1{font-family:'Press Start 2P',monospace;font-size:clamp(26px,5.2vw,50px);
-    line-height:1.25;margin:6px 0 4px;text-shadow:0 3px 0 rgba(0,0,0,.4)}
-  h1 .g{color:var(--accent)}
-  .tag{font-size:clamp(15px,2.4vw,20px);color:var(--muted);max-width:640px;margin:12px auto 0}
-  .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:30px}
+  header{padding:56px 0 34px;text-align:center;position:relative}
+  .badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:24px}
+  .badge{font-size:12px;font-weight:700;color:var(--muted);
+    background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--edge);border-radius:999px;padding:6px 13px;backdrop-filter:blur(6px)}
+  .badge b{color:var(--cyan)}
+  h1{font-family:'Press Start 2P',monospace;font-size:clamp(26px,5.4vw,52px);
+    line-height:1.28;margin:8px 0 4px;text-shadow:0 3px 24px rgba(124,92,255,.55)}
+  h1 .g{background:linear-gradient(90deg,var(--cyan),var(--violet-hi));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .tag{font-size:clamp(15px,2.4vw,20px);color:#c3c9ee;max-width:660px;margin:16px auto 0}
+  .tag b{color:#fff}
+  .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:32px}
   .btn{display:inline-flex;align-items:center;gap:10px;font-weight:800;font-size:16px;
-    padding:15px 26px;border-radius:12px;border:1px solid transparent;cursor:pointer;transition:.15s}
-  .btn-primary{background:linear-gradient(180deg,var(--accent-hi),var(--accent));color:#06240a;
-    box-shadow:0 6px 0 #3f8b3f,var(--shadow)}
-  .btn-primary:hover{transform:translateY(-2px);text-decoration:none;box-shadow:0 8px 0 #3f8b3f,var(--shadow)}
-  .btn-primary:active{transform:translateY(2px);box-shadow:0 3px 0 #3f8b3f}
-  .btn-ghost{background:var(--panel);border-color:var(--edge);color:var(--text)}
-  .btn-ghost:hover{background:var(--panel2);text-decoration:none;transform:translateY(-2px)}
-  .dl-note{margin-top:12px;font-size:13px;color:var(--muted)}
-  .dl-note code{background:var(--panel);border:1px solid var(--edge);padding:2px 7px;border-radius:6px;color:var(--accent-hi)}
+    padding:15px 28px;border-radius:14px;border:1px solid transparent;cursor:pointer;transition:.18s}
+  .btn-primary{color:#08040f;
+    background:linear-gradient(180deg,var(--cyan),var(--violet-hi));
+    box-shadow:var(--glow),0 8px 24px rgba(56,232,255,.28)}
+  .btn-primary:hover{transform:translateY(-2px);text-decoration:none;
+    box-shadow:0 0 34px rgba(124,92,255,.6),0 12px 30px rgba(56,232,255,.35)}
+  .btn-primary:active{transform:translateY(1px)}
+  .btn-ghost{background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border-color:var(--edge);color:var(--text);backdrop-filter:blur(6px)}
+  .btn-ghost:hover{border-color:var(--violet);text-decoration:none;transform:translateY(-2px)}
+  .dl-note{margin-top:14px;font-size:13px;color:var(--muted)}
+  .dl-note code{background:#0c0e24;border:1px solid var(--edge);padding:2px 7px;border-radius:6px;color:var(--cyan)}
 
-  section{padding:34px 0}
+  section{padding:36px 0}
   h2{font-family:'Press Start 2P',monospace;font-size:16px;color:var(--text);
-    margin:0 0 22px;letter-spacing:.3px}
-  h2 .n{color:var(--accent)}
+    margin:0 0 24px;letter-spacing:.4px}
+  h2 .n{color:var(--cyan)}
 
   /* feature cards */
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}
-  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--edge);
-    border-radius:14px;padding:20px;box-shadow:var(--shadow)}
-  .card .ic{font-size:22px;margin-bottom:10px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:16px}
+  .card{position:relative;background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--edge);border-radius:16px;padding:22px;box-shadow:var(--shadow);
+    backdrop-filter:blur(8px);transition:.18s}
+  .card:hover{transform:translateY(-3px);border-color:var(--violet)}
+  .card .ic{font-size:26px;margin-bottom:12px;filter:drop-shadow(0 0 10px rgba(124,92,255,.6))}
   .card h3{margin:0 0 6px;font-size:16px}
   .card p{margin:0;color:var(--muted);font-size:14px}
 
   /* requirements + steps */
   .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--edge);
-    border-radius:16px;padding:26px;box-shadow:var(--shadow)}
+    border-radius:18px;padding:28px;box-shadow:var(--shadow);backdrop-filter:blur(8px)}
   .req{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}
-  .req .pill{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--edge);
-    border-radius:10px;padding:10px 14px;font-weight:600;font-size:14px}
-  .req .pill span{color:var(--accent-hi)}
-  ol.steps{counter-reset:s;list-style:none;padding:0;margin:0;display:grid;gap:14px}
-  ol.steps li{counter-increment:s;position:relative;padding-left:52px;color:var(--muted)}
-  ol.steps li::before{content:counter(s);position:absolute;left:0;top:-2px;width:34px;height:34px;
+  .req .pill{display:flex;align-items:center;gap:8px;background:#0b0d22;border:1px solid var(--edge);
+    border-radius:12px;padding:10px 14px;font-weight:600;font-size:14px}
+  .req .pill span{color:var(--cyan)}
+  .req .pill small{color:var(--muted);font-weight:500}
+  ol.steps{counter-reset:s;list-style:none;padding:0;margin:0;display:grid;gap:16px}
+  ol.steps li{counter-increment:s;position:relative;padding-left:54px;color:var(--muted)}
+  ol.steps li::before{content:counter(s);position:absolute;left:0;top:-2px;width:36px;height:36px;
     display:grid;place-items:center;font-family:'Press Start 2P',monospace;font-size:12px;
-    color:#06240a;background:var(--accent);border-radius:9px;box-shadow:0 3px 0 #3f8b3f}
+    color:#08040f;background:linear-gradient(180deg,var(--cyan),var(--violet-hi));
+    border-radius:10px;box-shadow:var(--glow)}
   ol.steps li b{color:var(--text)}
-  code.k{background:var(--bg);border:1px solid var(--edge);padding:2px 7px;border-radius:6px;color:var(--accent-hi);font-size:13px}
+  code.k{background:#0b0d22;border:1px solid var(--edge);padding:2px 7px;border-radius:6px;color:var(--cyan);font-size:13px}
 
-  .note{border-left:3px solid var(--accent);background:rgba(93,184,92,.06);
-    border-radius:0 12px 12px 0;padding:16px 18px;color:var(--muted);font-size:14px}
+  .note{border-left:3px solid var(--violet);background:rgba(124,92,255,.08);
+    border-radius:0 14px 14px 0;padding:18px 20px;color:var(--muted);font-size:14px}
   .note b{color:var(--text)}
 
-  footer{border-top:1px solid var(--edge);margin-top:20px;padding:28px 0 50px;color:var(--muted);font-size:13px;text-align:center}
+  footer{border-top:1px solid var(--edge);margin-top:24px;padding:30px 0 54px;color:var(--muted);font-size:13px;text-align:center}
   footer a{color:var(--muted);font-weight:600}
-  .disclaim{max-width:720px;margin:10px auto 0;font-size:12px;opacity:.8}
+  .disclaim{max-width:740px;margin:12px auto 0;font-size:12px;opacity:.8}
+
+  @media (prefers-reduced-motion:reduce){#stars{display:none}}
 </style>
 </head>
 <body>
+<canvas id="stars" aria-hidden="true"></canvas>
 <div class="grid-bg"></div>
 <div class="wrap">
 
   <nav>
-    <div class="brand"><div class="cube"></div> HumanBuilder</div>
+    <div class="brand"><div class="planet"></div> HumanBuilder</div>
     <div class="nav-links">
       <a href="#features">Features</a>
       <a href="#install">Install</a>
@@ -125,13 +149,13 @@
       <div class="badge"><b>No</b> packet injection</div>
     </div>
     <h1>Human<span class="g">Builder</span></h1>
-    <p class="tag">An autonomous Litematica schematic builder that places blocks like a real
-      player — natural aim, human timing, lag-aware — so you can <b>estimate how long a build
-      actually takes</b>.</p>
+    <p class="tag">🚀 An autonomous Litematica builder that places your schematic like a real
+      player — natural aiming, human timing, and a wandering walk — so you can <b>see how long
+      a build would actually take by hand</b>.</p>
 
     <div class="cta">
       <a id="dlBtn" class="btn btn-primary" href="https://github.com/sagydori/minecraft-humanbuilder/releases/latest">
-        ⬇ Download .jar
+        ⬇ Download the mod
       </a>
       <a class="btn btn-ghost" href="https://github.com/sagydori/minecraft-humanbuilder/releases/latest">All releases</a>
       <a class="btn btn-ghost" href="https://github.com/sagydori/minecraft-humanbuilder">Source code</a>
@@ -140,55 +164,55 @@
   </header>
 
   <section id="features">
-    <h2><span class="n">#</span> What it does</h2>
+    <h2><span class="n">✦</span> What it does</h2>
     <div class="grid">
-      <div class="card"><div class="ic">🎯</div><h3>Natural aim</h3>
-        <p>Fitts's-law timing, quintic Bézier smoothing, dual-sine micro-tremor, overshoot-and-correct, and mouse-sensitivity quantization.</p></div>
-      <div class="card"><div class="ic">🎲</div><h3>Human timing</h3>
-        <p>Box–Muller Gaussian click delays, gradual fatigue that slows you down over time, plus occasional hesitation and misclicks.</p></div>
-      <div class="card"><div class="ic">📉</div><h3>Lag-aware</h3>
-        <p>Measures live TPS and scales every delay by 20 ⁄ TPS — and fully pauses when the server can't keep up, then resumes.</p></div>
-      <div class="card"><div class="ic">🧱</div><h3>Correct placement</h3>
-        <p>Validates every block against vanilla's own placement logic — slabs, stairs, pillars and directional blocks land right.</p></div>
-      <div class="card"><div class="ic">📐</div><h3>Litematica bridge</h3>
-        <p>Reads your placed schematic, builds bottom-up nearest-first, and only places blocks you actually have in your inventory.</p></div>
-      <div class="card"><div class="ic">⏱️</div><h3>Build-time estimate</h3>
-        <p>Live readout of blocks placed, blocks/min, seconds/block, TPS and fatigue — the whole point of the tool.</p></div>
+      <div class="card"><div class="ic">🛰️</div><h3>Builds it for you</h3>
+        <p>Reads the schematic you place in Litematica and lays every block automatically, one at a time — no clicking for hours.</p></div>
+      <div class="card"><div class="ic">🧠</div><h3>Thinks like Baritone</h3>
+        <p>Always goes for the nearest block it can place, builds the supports first, and plans the smartest route to get there.</p></div>
+      <div class="card"><div class="ic">🪐</div><h3>Moves like a human</h3>
+        <p>Walks with a natural little wander, aims with realistic timing and tiny imperfections — not a robot gliding on rails.</p></div>
+      <div class="card"><div class="ic">☄️</div><h3>Lag-aware</h3>
+        <p>Watches the server's TPS and slows down — or pauses and waits — when things get choppy, then picks back up on its own.</p></div>
+      <div class="card"><div class="ic">🧱</div><h3>Places blocks right</h3>
+        <p>Slabs, stairs, pillars and directional blocks all end up facing the correct way, checked against the game's own rules.</p></div>
+      <div class="card"><div class="ic">⏱️</div><h3>Time estimate</h3>
+        <p>A live on-screen readout of blocks placed, blocks per minute and an ETA — the whole point: know how long the real build takes.</p></div>
     </div>
   </section>
 
   <section id="install">
-    <h2><span class="n">#</span> Requirements</h2>
+    <h2><span class="n">✦</span> What you need</h2>
     <div class="panel">
-      <p style="margin:0 0 12px;color:var(--muted)">Install these Fabric mods for <b>Minecraft 1.21.11</b> alongside HumanBuilder:</p>
+      <p style="margin:0 0 14px;color:var(--muted)">Install these Fabric mods for <b>Minecraft 1.21.11</b> alongside HumanBuilder:</p>
       <div class="req">
         <div class="pill"><span>▸</span> Fabric API</div>
         <div class="pill"><span>▸</span> Litematica <small>(sakura-ryoko 0.26.11+)</small></div>
         <div class="pill"><span>▸</span> malilib</div>
-        <div class="pill"><span>▸</span> Cloth Config <small>(optional)</small></div>
-        <div class="pill"><span>▸</span> Mod Menu <small>(optional)</small></div>
+        <div class="pill"><span>▸</span> Cloth Config <small>(optional — settings menu)</small></div>
+        <div class="pill"><span>▸</span> Mod Menu <small>(optional — settings menu)</small></div>
       </div>
     </div>
 
     <div style="height:22px"></div>
-    <h2><span class="n">#</span> Setup</h2>
+    <h2><span class="n">✦</span> Get started</h2>
     <div class="panel">
       <ol class="steps">
-        <li>Download the <b>humanbuilder</b> jar with the green button above.</li>
-        <li>Drop it into your <code class="k">.minecraft/mods</code> folder, together with Fabric API, Litematica and malilib.</li>
-        <li>Launch Minecraft <b>1.21.11</b> with the Fabric loader profile.</li>
+        <li>Grab the <b>HumanBuilder</b> jar with the button above.</li>
+        <li>Drop it into your <code class="k">.minecraft/mods</code> folder, along with Fabric API, Litematica and malilib.</li>
+        <li>Launch Minecraft <b>1.21.11</b> using the Fabric profile.</li>
         <li>Load a schematic in Litematica and <b>place</b> it where you want to build.</li>
-        <li>Stand within ~4 blocks, with the needed blocks in your inventory, and press <code class="k">B</code> to toggle.</li>
-        <li>Read the action-bar: <b>placed · N/min · s/block · TPS · fatigue</b> — that's your estimate.</li>
+        <li>Stand nearby with the needed blocks in your inventory, then press <code class="k">B</code> to start or stop.</li>
+        <li>Watch the on-screen panel: <b>blocks placed · per minute · ETA</b> — that's your estimate. 🌌</li>
       </ol>
     </div>
 
     <div style="height:22px"></div>
     <div class="note">
-      <b>Made for personal use.</b> HumanBuilder is built for singleplayer and your own server, to
-      estimate manual build time. It's client-side and never fabricates packets — it only drives the
-      same key/mouse inputs you would. There's no anti-cheat to defeat in those worlds; the
-      human-like imperfection exists to make the time estimate realistic (and recordings look natural).
+      <b>Made for personal use.</b> HumanBuilder is for singleplayer and your own server, to estimate how
+      long a manual build takes. It's client-side and never fakes network packets — it only presses the
+      same keys and moves the same mouse you would. The human-like imperfection is there to make the time
+      estimate realistic (and to make recordings look natural), not to beat any anti-cheat.
     </div>
   </section>
 
@@ -199,12 +223,50 @@
       <a href="https://github.com/sagydori/minecraft-humanbuilder/blob/main/LICENSE">MIT License</a>
     </div>
     <p class="disclaim">Not affiliated with Mojang, Microsoft, Litematica or Fabric. Minecraft is a trademark of Mojang Studios.
-      Built automatically from source by GitHub Actions.</p>
+      Built automatically from source by GitHub Actions. 🪐</p>
   </footer>
 
 </div>
 
 <script>
+  // Lightweight twinkling starfield.
+  (function () {
+    var c = document.getElementById("stars");
+    if (!c || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    var ctx = c.getContext("2d"), stars = [], W, H, dpr = Math.min(window.devicePixelRatio || 1, 2);
+    function resize() {
+      W = c.width = Math.floor(innerWidth * dpr);
+      H = c.height = Math.floor(innerHeight * dpr);
+      c.style.width = innerWidth + "px"; c.style.height = innerHeight + "px";
+      var count = Math.round((innerWidth * innerHeight) / 9000);
+      stars = [];
+      for (var i = 0; i < count; i++) {
+        stars.push({
+          x: Math.random() * W, y: Math.random() * H,
+          r: (Math.random() * 1.3 + 0.3) * dpr,
+          a: Math.random(), s: Math.random() * 0.02 + 0.004,
+          vx: (Math.random() - 0.5) * 0.06 * dpr,
+          hue: Math.random() < 0.5 ? "180,232,255" : (Math.random() < 0.5 ? "156,134,255" : "255,211,107")
+        });
+      }
+    }
+    function tick() {
+      ctx.clearRect(0, 0, W, H);
+      for (var i = 0; i < stars.length; i++) {
+        var st = stars[i];
+        st.a += st.s; var tw = 0.5 + 0.5 * Math.sin(st.a);
+        st.x += st.vx; if (st.x < 0) st.x = W; if (st.x > W) st.x = 0;
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(" + st.hue + "," + (0.25 + tw * 0.7).toFixed(3) + ")";
+        ctx.arc(st.x, st.y, st.r, 0, 6.283);
+        ctx.fill();
+      }
+      requestAnimationFrame(tick);
+    }
+    addEventListener("resize", resize, { passive: true });
+    resize(); tick();
+  })();
+
   // Resolve the newest release jar so the button + filename always reflect the
   // latest build (the asset name changes every publish).
   (function () {
